@@ -6,6 +6,16 @@
 
 ![桌面工作台预览](docs/screenshots/dashboard-desktop.png)
 
+## v1.1 已落地的优化
+
+按 [DeepSeek 评审采纳记录](docs/V11_REVIEW_RESPONSE.md) 与三维家、ERPNext 官方业务资料，新增：
+
+- 投影面积/延米/展开面积/数量/套餐计价、免折费用、税额与参考毛利；独立订单明细及审批增减项。
+- 私有图纸和照片附件；门店冻结规格交接，工厂独立接单生产并回传进度。
+- 库存预留/可用量/采购在途、分批收货与超收拦截；分期回款、逾期及履约检查。
+- 跟进记录、设计版本、供应商档案、客户/物料 CSV 导入及单据打印。
+- SQL 聚合、请求级权限缓存、复合索引、健康检查、SQLite 在线备份及真实 PostgreSQL CI。
+
 ## 本地启动
 
 需要 Python **3.12+**，首次安装依赖需要联网；运行页面不依赖外部 CDN，不需要 Node.js、Redis 或 Docker。
@@ -29,6 +39,7 @@ Windows 也可双击 `run.bat`。访问 **http://127.0.0.1:8000**。
 python -m pip install -r requirements.txt
 python manage.py migrate
 python manage.py seed_demo --credentials-file .demo-credentials.txt
+python manage.py seed_upgrade_demo
 python manage.py collectstatic --noinput
 python manage.py runserver 127.0.0.1:8000
 ```
@@ -83,17 +94,30 @@ docker compose exec erp python manage.py createsuperuser
 
 镜像不自动灌入演示账号。默认开启安全 Cookie 和 HTTPS 重定向，需要反向代理终止 HTTPS。设置 `DJANGO_TRUSTED_PROXY` 为 Waitress 实际看到的代理节点 IP，代理须覆盖并清理客户端传入的 `X-Forwarded-*`，再设置 `X-Forwarded-Proto=https`；不接受 `*` 通配信任。未设置代理信任时转发头会被清除。相同的生产服务器也可用 `python scripts/serve.py` 运行。SQLite 数据保存在 `erp-data` 卷。正式业务上线前请验证备份与恢复；当前开发机器未安装 Docker，容器构建状态见验证记录。
 
-若使用 PostgreSQL，安装 `psycopg[binary]`，配置 `POSTGRES_HOST`、`POSTGRES_PORT`、`POSTGRES_DB`、`POSTGRES_USER` 和 `POSTGRES_PASSWORD` 后运行迁移。生产设置必须提供 `DJANGO_DEBUG=false`、随机 `DJANGO_SECRET_KEY`、`DJANGO_ALLOWED_HOSTS` 和 `DJANGO_CSRF_TRUSTED_ORIGINS`；支持 PostgreSQL 配置，不将未经验证的数据库部署宣称为已验收。
+若使用 PostgreSQL，运行 `python -m pip install -r requirements-postgres.txt`，配置 `POSTGRES_HOST`、`POSTGRES_PORT`、`POSTGRES_DB`、`POSTGRES_USER` 和 `POSTGRES_PASSWORD` 后运行迁移。生产设置必须提供 `DJANGO_DEBUG=false`、随机 `DJANGO_SECRET_KEY`、`DJANGO_ALLOWED_HOSTS` 和 `DJANGO_CSRF_TRUSTED_ORIGINS`；GitHub CI 使用 PostgreSQL 16 执行迁移和双工单库存竞争测试；生产容量及备份恢复仍需部署环境验收。
+
+健康检查为 `/healthz/`。升级前可运行：
+
+```bash
+python manage.py backup_db output/backups/before-upgrade.sqlite3
+python manage.py migrate
+```
+
+备份目标必须为新文件。此命令只备份 SQLite 数据库，私有附件目录 `media/` 须另行备份；PostgreSQL 使用 `pg_dump`。恢复应在停止写入的独立副本上演练，核对单据/收付款/库存与附件完整性后再用于生产。
 
 ## 设计与交付文档
 
 - [完整中文交互方案 v1.0](docs/superpowers/specs/2026-10-16-furniture-erp-design.md)：五阶段、流程图、12 个关键页面、权限及苹果风格细则。
 - [开源调研与复用](docs/OPEN_SOURCE.md)：ERPNext / Odoo / InvenTree 的参考范围，Django / Tabler 的实际复用及许可证。
 - [实施计划](docs/superpowers/plans/2026-10-16-furniture-erp.md)
+- [v1.1 优化规格](docs/superpowers/specs/2026-10-16-erp-v11-design.md)
+- [逐项采纳与边界](docs/V11_REVIEW_RESPONSE.md)
 - [验证记录](docs/VALIDATION.md)
 
 ## 首版边界
 
-财务为业务收付款及对账，未实现法定总账、税务申报、电子发票或银行直连。生产为人工排程与 BOM 领料，未实现板材套裁、自动产能优化、批次追溯、部分收货或退货退款自动化。设计与验收保存结构化文字和版本，未接入图纸附件存储、电子签章或现场定位。跨组织首版为隔离业务域；门店与工厂的正式跨组织交接需要后续业务规则。
+财务为业务收付款及对账，未实现法定总账、税务申报、电子发票或银行直连。参考毛利不是实际成本核算。生产为人工排程、平铺 BOM 与领料，未实现板材套裁、MES 工序/质检、设备集成或多级审批引擎。采购已支持分批收货；销售多批配送、退货退款仍后续。门厂交接已实现基础闭环，交接后的改单/改派/撤回/拒单重发不自动处理。移动端为响应式 Web，无原生 App、离线、定位或设备扫码。
+
+旧合同额不会因迁移重算；如与回填产品快照不符，页面会提示核对历史记录。已预留工单先释放才能换仓；已交接的产品及工厂订单不能单边取消或修改。已有分期计划的合同金额变更、退款与计划修订需要后续专项流程。
 
 本仓库不是 ERPNext / Odoo / InvenTree 的 fork，未复制其业务源码。Tabler 1.6.1 CSS 本地复用并保留 MIT 许可证；Django 等依赖保留各自许可证。重新获取 UI 资产时才需要 npm：`npm pack @tabler/core@1.6.1` 后运行 `python scripts/vendor_assets.py tabler-core-1.6.1.tgz`。
