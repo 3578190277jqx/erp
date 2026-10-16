@@ -52,7 +52,9 @@ def feature_context(request,obj):
         context['can_revision']=scoped(request.user,m.Design,action='edit').filter(pk=obj.pk).exists()
         context['design_versions']=scoped(request.user,m.Design).filter(family_id=obj.family_id).order_by('-revision')[:20]
     if isinstance(obj,m.ChangeRequest):
-        context['change_lines']=obj.lines.select_related('order_line').all()
+        change_lines=list(obj.lines.select_related('order_line').all())
+        for line in change_lines:line.display_net=pricing.line_net(line,obj.order.discount)
+        context['change_lines']=change_lines
         form=ChangeLineForm(request.user,obj)
         fields=[name for name in pricing.SNAPSHOT_FIELDS if name in form.fields]
         context['change_source_lines']={str(line.pk):{name:str(getattr(line,name)) for name in fields} for line in obj.order.lines.all()}

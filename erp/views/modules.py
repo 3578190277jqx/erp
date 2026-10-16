@@ -54,6 +54,13 @@ def record_for(request, module, pk):
 def filtered(request, module):
     qs = scoped(request.user, module.model, active_org(request))
     if module.key=='customers' and request.GET.get('include_internal')!='1':qs=qs.filter(is_internal=False)
+    parent_filter={'followups':('customer',m.Customer),'receipts':('purchase',m.Purchase)}.get(module.key)
+    if parent_filter and request.GET.get(parent_filter[0]):
+        field,parent_model=parent_filter
+        try:parent_id=int(request.GET[field])
+        except (ValueError,TypeError):return qs.none()
+        if not scoped(request.user,parent_model,active_org(request)).filter(pk=parent_id).exists():return qs.none()
+        qs=qs.filter(**{f'{field}_id':parent_id})
     for field in module.model._meta.fields:
         if isinstance(field, m.models.ForeignKey):
             qs = qs.select_related(field.name)
@@ -191,6 +198,10 @@ def detail(request, key, pk):
     for other,field in RELATED_MODULES.get(type(obj),[]):
         related.extend({'module':other,'obj':child} for child in scoped(request.user,other.model).filter(**{field:obj})[:8])
     context['related'] = related
+    context['context_lists']=[]
+    for parent,key,param,title in [(m.Customer,'followups','customer','全部跟进记录'),(m.Purchase,'receipts','purchase','全部收货凭证')]:
+        if isinstance(obj,parent) and can(request.user,key,'view',obj.organization_id):
+            context['context_lists'].append({'key':key,'param':param,'title':title})
     context['new_related'] = []
     for target, parent_field in [('measurements', 'customer'), ('designs', 'customer'), ('quotes', 'customer'),
                                  ('followups','customer'), ('breakdowns', 'order'), ('deliveries', 'order'), ('installations', 'order'), ('aftersales', 'order'), ('changes', 'order')]:

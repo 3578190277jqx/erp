@@ -63,6 +63,15 @@ class SecondReviewPricingTests(ERPTestCase):
         services.transition(self.admin,order,'confirm',order.version)
         order.refresh_from_db();self.assertEqual(order.status,'confirmed');self.assertEqual(order.discount,0);self.assertEqual(order.total,200)
 
+    def test_contextual_followup_list_filters_one_visible_customer(self):
+        other=self.make(m.Customer,name='另一个客户',phone='1234')
+        self.make(m.FollowUp,customer=self.customer,note='本客户沟通')
+        self.make(m.FollowUp,customer=other,note='其他客户沟通')
+        self.client.force_login(self.admin)
+        response=self.client.get(f'/modules/followups/?customer={self.customer.pk}')
+        self.assertEqual(response.context['page_obj'].paginator.count,1)
+        self.assertContains(self.client.get(f'/modules/customers/{self.customer.pk}/'),'全部跟进记录')
+
 
 class SecondReviewCollaborationTests(ERPTestCase):
     def setUp(self):

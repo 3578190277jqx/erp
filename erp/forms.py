@@ -189,4 +189,5 @@ class ChangeLineForm(forms.ModelForm):
             for name in SNAPSHOT_FIELDS:self.fields.pop(name,None)
         else:
             self.fields['name'].required=True
+            self.fields['quantity'].label='数量 / 件数（展开面积填㎡）'
         style_fields(self)
