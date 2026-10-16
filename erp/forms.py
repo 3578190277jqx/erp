@@ -74,6 +74,7 @@ def document_form(module, user, data=None, instance=None, active_org=None):
     for name, field in form.fields.items():
         if isinstance(field, forms.ModelChoiceField) and name not in ('organization', 'owner'):
             field.queryset = scoped(user, field.queryset.model, org.pk if org else -1)
+            if field.queryset.model==m.Customer:field.queryset=field.queryset.filter(is_internal=False)
     if isinstance(form.instance, m.Order) and form.instance.quote_id:
         form.fields['total'].disabled = True
         form.fields['customer'].disabled = True
@@ -149,3 +150,32 @@ class PaymentForm(forms.Form):
         if (incoming and (not data.get('order') or data.get('purchase'))) or (not incoming and (not data.get('purchase') or data.get('order'))):
             raise ValidationError('收款只选择订单；付款只选择采购，不能同时选择。')
         return data
+
+
+class ChangeLineForm(forms.ModelForm):
+    class Meta:
+        model=m.ChangeLine
+        fields=['operation','order_line','name','room','specification','pricing_mode','category','width_mm','height_mm',
+                'quantity','unit','unit_price','unit_cost','discountable']
+
+    def __init__(self,user,change,data=None,**kwargs):
+        from .permissions import can
+        from .services.pricing import SNAPSHOT_FIELDS
+        operation=data.get('operation') if data else kwargs.get('initial',{}).get('operation','add')
+        if data is not None and operation=='update':
+            data=data.copy()
+            try:target=change.order.lines.filter(pk=int(data.get('order_line',''))).first()
+            except (TypeError,ValueError):target=None
+            if target:
+                for name in SNAPSHOT_FIELDS:
+                    if name not in data:data[name]=getattr(target,name)
+        super().__init__(data=data,**kwargs)
+        self.fields['order_line'].queryset=change.order.lines.all()
+        self.fields['discountable']=forms.TypedChoiceField(label='参与合同折扣',choices=[('True','是'),('False','否')],
+                                  coerce=lambda value:value=='True',initial='True')
+        if not can(user,'finance','view',change.organization_id):self.fields.pop('unit_cost')
+        if operation=='remove':
+            for name in SNAPSHOT_FIELDS:self.fields.pop(name,None)
+        else:
+            self.fields['name'].required=True
+        style_fields(self)

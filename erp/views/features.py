@@ -13,7 +13,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 from erp import models as m
 from erp.permissions import scoped,can,accessible_organizations
-from erp.forms import style_fields
+from erp.forms import style_fields,ChangeLineForm
 from erp.services import evidence,collaboration,materials,receivables,pricing,daily
 from .modules import record_for,module_for,active_org,error_message,BUSINESS_ERRORS
 
@@ -24,11 +24,12 @@ def feature_context(request,obj):
         if isinstance(obj,m.Quote):
             amounts=pricing.quote_amounts(obj)
         else:
-            net=sum((line.line_total for line in obj.lines.all()),Decimal(0))
-            cost=sum((pricing.rounded(line.billable_quantity*line.unit_cost) for line in obj.lines.all()),Decimal(0))
+            order_lines=list(obj.lines.all())
+            net=sum((line.line_total for line in order_lines),Decimal(0))
+            cost=sum((pricing.rounded(line.billable_quantity*line.unit_cost) for line in order_lines),Decimal(0))
             amounts={'net':net,'tax':pricing.rounded(net*obj.tax_rate),'cost':cost,'margin':net-cost}
             context['snapshot_mismatch']=obj.total!=net+amounts['tax']
-            context['order_lines']=obj.lines.all()
+            context['order_lines']=order_lines
         context['amounts']=amounts
         context['show_costs']=can(request.user,'finance','view',obj.organization_id)
     if isinstance(obj,m.Order):
@@ -36,8 +37,8 @@ def feature_context(request,obj):
         context['can_plan']=obj.kind=='sale' and obj.status=='confirmed' and not obj.payment_plans.exists() and (
             can(request.user,'finance','create',obj.organization_id) or can(request.user,'changes','approve',obj.organization_id))
         context['handoff']=m.Handoff.objects.filter(order=obj).first()
-        context['can_handoff']=obj.kind=='sale' and obj.status=='confirmed' and scoped(request.user,m.Order,action='edit').filter(pk=obj.pk).exists() and not context['handoff']
-        context['factories']=m.Organization.objects.filter(kind='factory').exclude(pk=obj.organization_id)
+        context['can_handoff']=obj.kind=='sale' and obj.status=='confirmed' and scoped(request.user,m.Order,action='edit').filter(pk=obj.pk).exists() and (not context['handoff'] or context['handoff'].status=='rejected')
+        context['factories']=collaboration.allowed_factories(request.user,obj.organization)
     if isinstance(obj,m.Production):
         context['can_reserve']=obj.status=='planned' and scoped(request.user,m.Production,action='reserve').filter(pk=obj.pk).exists()
         context['reservations']=obj.reservations.select_related('stock__material').all()
@@ -52,10 +53,9 @@ def feature_context(request,obj):
         context['design_versions']=scoped(request.user,m.Design).filter(family_id=obj.family_id).order_by('-revision')[:20]
     if isinstance(obj,m.ChangeRequest):
         context['change_lines']=obj.lines.select_related('order_line').all()
-        form=forms.modelform_factory(m.ChangeLine,fields=['operation','order_line','name','room','specification','quantity','unit','unit_price','unit_cost'])()
-        form.fields['order_line'].queryset=obj.order.lines.all()
-        if not can(request.user,'finance','view',obj.organization_id):form.fields.pop('unit_cost')
-        style_fields(form)
+        form=ChangeLineForm(request.user,obj)
+        fields=[name for name in pricing.SNAPSHOT_FIELDS if name in form.fields]
+        context['change_source_lines']={str(line.pk):{name:str(getattr(line,name)) for name in fields} for line in obj.order.lines.all()}
         context['change_form']=form
         context['can_change_lines']=obj.status=='pending' and scoped(request.user,m.ChangeRequest,action='edit').filter(pk=obj.pk).exists()
     if obj.module in evidence.PARENTS:
@@ -97,8 +97,8 @@ def feature_action(request,key,pk,operation):
             revised=daily.new_design_revision(request.user,obj,version)
             return redirect('detail',key='designs',pk=revised.pk)
         elif operation=='handoff' and isinstance(obj,m.Order):
-            target=get_object_or_404(m.Organization,pk=request.POST.get('target'),kind='factory')
-            result=collaboration.send_handoff(request.user,obj,target,version,request.POST.get('note',''))
+            target=get_object_or_404(collaboration.allowed_factories(request.user,obj.organization),pk=request.POST.get('target'))
+            result=collaboration.send_handoff(request.user,obj,target,version,request.POST.get('note',''),request.POST.get('handoff_version'))
             return redirect('detail',key='handoffs',pk=result.pk)
         elif operation in ('accept','reject') and isinstance(obj,m.Handoff):
             result=collaboration.accept_handoff(request.user,obj,version,reject=operation=='reject',note=request.POST.get('note',''))
@@ -113,10 +113,7 @@ def feature_action(request,key,pk,operation):
             quantities={name[4:]:value for name,value in request.POST.items() if name.startswith('qty_') and value.strip() and value!='0'}
             materials.receive_partial(request.user,obj,quantities,request.POST.get('reference',''),version)
         elif operation=='change-line' and isinstance(obj,m.ChangeRequest):
-            Form=forms.modelform_factory(m.ChangeLine,fields=['operation','order_line','name','room','specification','quantity','unit','unit_price','unit_cost'])
-            form=Form(request.POST)
-            form.fields['order_line'].queryset=obj.order.lines.all()
-            if not can(request.user,'finance','view',obj.organization_id):form.fields.pop('unit_cost')
+            form=ChangeLineForm(request.user,obj,request.POST)
             if not form.is_valid():raise ValidationError([str(e) for errors in form.errors.values() for e in errors])
             pricing.add_change_line(request.user,obj,form.cleaned_data,int(version))
         else:raise Http404

@@ -24,6 +24,7 @@ class EvidenceCollaborationTests(ERPTestCase):
     def test_factory_handoff_redacts_retail_data_and_uses_local_order(self):
         self.assertTrue(hasattr(collaboration,'send_handoff'),'Factory handoff must be implemented')
         factory = m.Organization.objects.create(name='定制工厂',kind='factory')
+        m.CollaborationRoute.objects.create(source=self.org,target=factory)
         planner = User.objects.create_user('factory_planner')
         m.Membership.objects.create(user=planner,organization=factory,role='planner',scope='org')
         order = self.order(status='confirmed')

@@ -6,7 +6,7 @@ from django.test import TransactionTestCase
 
 
 class HistoricalUpgradeTests(TransactionTestCase):
-    latest=('erp','0007_backfill_execution_history')
+    latest=('erp','0009_backfill_second_review')
 
     def tearDown(self):
         MigrationExecutor(connection).migrate([self.latest])
@@ -33,6 +33,7 @@ class HistoricalUpgradeTests(TransactionTestCase):
         executor=MigrationExecutor(connection);executor.migrate([self.latest])
         from erp import models as m
         self.assertEqual(m.Order.objects.get(pk=order.pk).total,850)
+        self.assertEqual(m.Order.objects.get(pk=order.pk).discount,Decimal('.9'))
         self.assertEqual(m.OrderLine.objects.get(order_id=order.pk).line_total,900)
         self.assertEqual(m.OrderLine.objects.get(order_id=order.pk).name,'原产品')
         self.assertEqual(m.PurchaseLine.objects.get(pk=row.pk).received_qty,10)

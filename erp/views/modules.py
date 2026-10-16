@@ -51,6 +51,7 @@ def record_for(request, module, pk):
 
 def filtered(request, module):
     qs = scoped(request.user, module.model, active_org(request))
+    if module.key=='customers' and request.GET.get('include_internal')!='1':qs=qs.filter(is_internal=False)
     for field in module.model._meta.fields:
         if isinstance(field, m.models.ForeignKey):
             qs = qs.select_related(field.name)

@@ -80,3 +80,11 @@
     }
   });
 })();
+
+// Source product snapshots prefill the change form; the server independently
+// checks the target, dimensions, Decimal totals and all authorization.
+(()=>{const form=document.querySelector('[data-change-line]'),source=document.getElementById('change-source-lines');if(!form||!source)return;
+const lines=JSON.parse(source.textContent),operation=form.elements.operation,target=form.elements.order_line;
+const update=()=>{const remove=operation.value==='remove';for(const field of form.querySelectorAll('.form-field')){const input=field.querySelector('input,select,textarea');if(!input)continue;const pricing=!['operation','order_line'].includes(input.name);field.hidden=remove&&pricing;input.disabled=remove&&pricing;}target.required=operation.value!=='add';};
+const prefill=()=>{if(operation.value!=='update')return;const values=lines[target.value];if(!values)return;for(const [name,value] of Object.entries(values)){const input=form.elements[name];if(input)input.value=value;}};
+operation.addEventListener('change',()=>{prefill();update();});target.addEventListener('change',prefill);update();})();

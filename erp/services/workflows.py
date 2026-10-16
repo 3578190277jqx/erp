@@ -122,7 +122,7 @@ def prerequisites(user, obj, action, note):
 def effects(user, obj, action):
     if isinstance(obj, m.Quote) and action == 'accept':
         order = m.Order.objects.create(organization=obj.organization, owner=obj.owner, customer=obj.customer,
-                               quote=obj, title=obj.title, total=obj.total,tax_rate=obj.tax_rate)
+                               quote=obj, title=obj.title, total=obj.total,tax_rate=obj.tax_rate,discount=obj.discount)
         from .pricing import copy_quote_lines
         copy_quote_lines(obj,order)
         system_update(user, obj.customer, 'quote_accepted', status='won')

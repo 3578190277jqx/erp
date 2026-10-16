@@ -26,7 +26,7 @@ def dashboard(request):
     today = timezone.localdate()
     orders = scoped_model(request, m.Order).exclude(status='cancelled')
     quotes = scoped_model(request, m.Quote)
-    customers = scoped_model(request, m.Customer)
+    customers = scoped_model(request, m.Customer).filter(is_internal=False)
     open_orders = orders.exclude(status__in=['completed', 'draft'])
     order_value = orders.exclude(status='draft').aggregate(s=Sum('total'))['s'] or Decimal('0')
     tasks = []
@@ -86,6 +86,7 @@ def reports(request):
         if module.key in ('audit', 'warehouses', 'movements') or not can(request.user, module.model.module, 'view', active_org(request)):
             continue
         qs = scoped_model(request, module.model)
+        if module.key=='customers':qs=qs.filter(is_internal=False)
         fields = [f.name for f in module.model._meta.fields]
         counts = []
         if 'status' in fields:

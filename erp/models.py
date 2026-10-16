@@ -107,6 +107,8 @@ class Record(models.Model):
 class Customer(Record):
     module = 'customers'
     name = models.CharField('客户名称', max_length=100)
+    is_internal = models.BooleanField('内部协作单位',default=False,editable=False)
+    internal_source = models.ForeignKey(Organization,verbose_name='协作源门店',null=True,blank=True,on_delete=models.PROTECT,related_name='factory_partners',editable=False)
     phone = models.CharField('联系电话', max_length=30)
     address = models.CharField('项目地址', max_length=250, blank=True)
     source = models.CharField('线索来源', max_length=40, default='门店到访')
@@ -114,6 +116,9 @@ class Customer(Record):
         ('new', '新线索'), ('contacted', '跟进中'), ('measuring', '量尺中'),
         ('designing', '设计中'), ('quoted', '已报价'), ('won', '已成交'), ('lost', '已关闭')])
     due_date = models.DateField('下次跟进', null=True, blank=True)
+
+    class Meta(Record.Meta):
+        constraints=[models.UniqueConstraint(fields=['organization','internal_source'],name='unique_internal_customer_source')]
 
 
 class Measurement(Record):
@@ -145,7 +150,7 @@ class Quote(Record):
     title = models.CharField('报价名称', max_length=150)
     discount = models.DecimalField('折扣系数（0—1）', max_digits=5, decimal_places=4, default=1,
                                    validators=[MinValueValidator(Decimal('0')), MaxValueValidator(Decimal('1'))])
-    total = money_field('含折扣总额')
+    total = money_field('含税总额')
     tax_rate = models.DecimalField('税率（0—1）', max_digits=5, decimal_places=4, default=0,
                                   validators=[MinValueValidator(0), MaxValueValidator(1)])
     status = models.CharField('状态', max_length=20, default='draft', choices=[
@@ -209,6 +214,7 @@ class Order(Record):
     contract_number = models.CharField('合同编号', max_length=80, blank=True)
     due_date = models.DateField('承诺交期', null=True, blank=True)
     total = money_field('合同金额')
+    discount = models.DecimalField('合同折扣快照',max_digits=5,decimal_places=4,default=1,validators=[MinValueValidator(Decimal('.01')),MaxValueValidator(1)])
     tax_rate = models.DecimalField('税率', max_digits=5, decimal_places=4, default=0, validators=[MinValueValidator(0),MaxValueValidator(1)])
     kind = models.CharField('订单类型', max_length=20, default='sale', choices=[('sale','销售订单'),('manufacturing','工厂生产订单')])
     source_handoff = models.OneToOneField('Handoff', verbose_name='来源交接', null=True, blank=True,
@@ -455,7 +461,7 @@ class AuditEvent(models.Model):
         indexes = [models.Index(fields=['organization','code','created_at'],name='audit_org_code_time')]
 
 
-class ChangeLine(models.Model):
+class ChangeLine(PriceBasis):
     change = models.ForeignKey(ChangeRequest, on_delete=models.CASCADE, related_name='lines')
     operation = models.CharField('变更类型',max_length=10,choices=[('add','增项'),('update','修改'),('remove','减项')])
     order_line = models.ForeignKey(OrderLine,on_delete=models.SET_NULL,null=True,blank=True,verbose_name='原订单产品')
@@ -498,6 +504,24 @@ class Handoff(Record):
         super().clean()
         if self.target_organization_id and (self.target_organization_id == self.organization_id or self.target_organization.kind != 'factory'):
             raise ValidationError('接单方必须是另一家工厂组织。')
+
+
+class CollaborationRoute(models.Model):
+    source = models.ForeignKey(Organization,verbose_name='源门店/组织',on_delete=models.PROTECT,related_name='outgoing_routes')
+    target = models.ForeignKey(Organization,verbose_name='允许接单工厂',on_delete=models.PROTECT,related_name='incoming_routes')
+    enabled = models.BooleanField('启用',default=True)
+
+    class Meta:
+        verbose_name='门厂协作授权'
+        verbose_name_plural='门厂协作授权'
+        constraints=[models.UniqueConstraint(fields=['source','target'],name='unique_collaboration_route')]
+
+    def clean(self):
+        if self.source_id==self.target_id or self.target_id and self.target.kind!='factory':
+            raise ValidationError('协作目标必须是另一工厂组织。')
+
+    def __str__(self):
+        return f'{self.source} → {self.target}'
 
 
 class StockReservation(Record):
