@@ -75,6 +75,8 @@ def add_change_line(user, change, values, version):
     before = snapshot(change)
     line = m.ChangeLine(change=change,**values)
     line.full_clean()
+    line.net_amount=line_net(line,change.order.discount) if line.operation!='remove' else Decimal(0)
+    line._meta.get_field('net_amount').clean(line.net_amount,line)
     line.save()
     proposed = proposed_lines(change)
     net = sum((v['line_total'] for v in proposed.values()),Decimal(0))
@@ -94,6 +96,7 @@ def apply_change_lines(user,change):
         else:
             values = {k:getattr(line,k) for k in SNAPSHOT_FIELDS}
             values['line_total'] = line_net(line,change.order.discount)
+            line.net_amount=values['line_total'];line.save(update_fields=['net_amount'])
             if line.operation == 'update':
                 m.OrderLine.objects.filter(pk=line.order_line_id).update(**values)
             else:

@@ -31,6 +31,7 @@ class SecondReviewPricingTests(ERPTestCase):
         self.assertEqual(order.total,before)
         self.assertEqual(line.pricing_mode,'projected');self.assertEqual(line.billable_quantity,Decimal('8.32'))
         self.assertEqual(line.specification,'灰色');self.assertEqual(line.line_total,Decimal('10907.52'))
+        self.assertEqual(change.lines.get().net_amount,Decimal('10907.52'))
 
     def test_new_linear_and_non_discountable_fee_share_order_pricing(self):
         order=self.priced_order()
@@ -71,6 +72,16 @@ class SecondReviewPricingTests(ERPTestCase):
         response=self.client.get(f'/modules/followups/?customer={self.customer.pk}')
         self.assertEqual(response.context['page_obj'].paginator.count,1)
         self.assertContains(self.client.get(f'/modules/customers/{self.customer.pk}/'),'全部跟进记录')
+
+    def test_approved_legacy_change_is_not_repriced_for_display(self):
+        order=self.order(status='confirmed');m.Order.objects.filter(pk=order.pk).update(discount=Decimal('.9'))
+        change=self.make(m.ChangeRequest,order=order,order_version=order.version,proposed_total=1000,
+                         proposed_due_date=date(2026,12,1),note='历史批准',status='approved')
+        m.ChangeLine.objects.create(change=change,operation='update',name='历史产品',quantity=1,unit_price=1000)
+        self.client.force_login(self.admin)
+        response=self.client.get(f'/modules/changes/{change.pk}/')
+        self.assertIsNone(response.context['change_lines'][0].display_net)
+        self.assertContains(response,'历史口径')
 
 
 class SecondReviewCollaborationTests(ERPTestCase):

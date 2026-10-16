@@ -53,7 +53,9 @@ def feature_context(request,obj):
         context['design_versions']=scoped(request.user,m.Design).filter(family_id=obj.family_id).order_by('-revision')[:20]
     if isinstance(obj,m.ChangeRequest):
         change_lines=list(obj.lines.select_related('order_line').all())
-        for line in change_lines:line.display_net=pricing.line_net(line,obj.order.discount)
+        for line in change_lines:
+            line.display_net=line.net_amount
+            if line.display_net is None and obj.status=='pending':line.display_net=pricing.line_net(line,obj.order.discount)
         context['change_lines']=change_lines
         form=ChangeLineForm(request.user,obj)
         fields=[name for name in pricing.SNAPSHOT_FIELDS if name in form.fields]

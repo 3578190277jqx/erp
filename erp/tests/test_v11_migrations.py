@@ -6,7 +6,7 @@ from django.test import TransactionTestCase
 
 
 class HistoricalUpgradeTests(TransactionTestCase):
-    latest=('erp','0011_align_discount_validation')
+    latest=('erp','0012_change_line_net_snapshot')
 
     def tearDown(self):
         MigrationExecutor(connection).migrate([self.latest])
@@ -68,5 +68,6 @@ class HistoricalUpgradeTests(TransactionTestCase):
         self.assertEqual(m.ChangeRequest.objects.get(code='V11-CH0').status,'rejected')
         self.assertEqual(m.ChangeRequest.objects.get(code='V11-CH1').status,'approved')
         self.assertEqual(m.ChangeLine.objects.count(),2)
+        self.assertTrue(all(value is None for value in m.ChangeLine.objects.values_list('net_amount',flat=True)))
         self.assertEqual(m.CollaborationRoute.objects.count(),0)
         self.assertTrue(m.AuditEvent.objects.filter(action='upgrade_change_review').exists())

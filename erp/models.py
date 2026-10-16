@@ -476,6 +476,8 @@ class ChangeLine(PriceBasis):
     unit = models.CharField('单位',max_length=10,default='套')
     unit_price = money_field('变更后单价')
     unit_cost = money_field('变更后参考成本')
+    net_amount = models.DecimalField('变更行净额快照',max_digits=14,decimal_places=2,null=True,blank=True,editable=False,
+                                    validators=[MinValueValidator(0)])
 
     class Meta:
         ordering = ['id']
