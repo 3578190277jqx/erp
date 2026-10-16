@@ -1,0 +1,16 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.sqlite3-*
+.env
+.secret-key
+staticfiles/
+media/
+node_modules/
+output/
+.superpowers/
+.playwright-cli/
+.worktrees/
+*.log
