@@ -1,0 +1,1 @@
+{% extends 'erp/base.html' %}{% block title %}记录不可用{% endblock %}{% block content %}<section class="panel empty-state error-state"><span class="eyebrow">404 · RECORD UNAVAILABLE</span><h1>这条记录暂不可用。</h1><p>记录可能不存在，或不在当前授权的数据范围内。</p><a class="btn btn-primary" href="{% url 'dashboard' %}">返回工作台</a></section>{% endblock %}

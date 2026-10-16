@@ -1,0 +1,1 @@
+{% extends 'erp/base.html' %}{% block title %}无访问权限{% endblock %}{% block content %}<section class="panel empty-state error-state"><span class="eyebrow">403 · ACCESS LIMITED</span><h1>此处需要相应授权。</h1><p>当前角色或组织范围不允许此操作。请联系管理员，或切换已有授权的组织。</p><a class="btn btn-primary" href="{% url 'dashboard' %}">返回工作台</a></section>{% endblock %}

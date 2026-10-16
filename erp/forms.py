@@ -1,0 +1,132 @@
+from django import forms
+from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from . import models as m
+from .permissions import accessible_organizations, scoped, member_orgs, role_allows
+
+
+def style_fields(form):
+    for name, field in form.fields.items():
+        if isinstance(field.widget, forms.HiddenInput):
+            continue
+        field.widget.attrs['class'] = 'form-select' if isinstance(field.widget, forms.Select) else 'form-control'
+        if isinstance(field, forms.DateField):
+            field.widget = forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date', 'class': 'form-control'})
+        if isinstance(field.widget, forms.Textarea):
+            field.widget.attrs['rows'] = 3
+        if field.required:
+            field.widget.attrs['aria-required'] = 'true'
+
+
+def selected_org(user, module, data, instance, active_org):
+    if instance and instance.pk:
+        return instance.organization
+    allowed = accessible_organizations(user, module, 'create')
+    selected = data.get('organization') if data else active_org
+    try:
+        return allowed.filter(pk=int(selected)).first() if selected else allowed.first()
+    except (ValueError, TypeError):
+        return None
+
+
+def responsible_users(user, module, organization):
+    User = get_user_model()
+    if user.is_superuser:
+        return User.objects.filter(is_active=True)
+    if not organization:
+        return User.objects.none()
+    own_only = not any(member.scope != 'own' and organization.pk in member_orgs(member)
+                       and role_allows(member.role, module, 'edit') for member in user.memberships.all())
+    if own_only:
+        return User.objects.filter(pk=user.pk)
+    ids = {user.pk}
+    for member in m.Membership.objects.select_related('user'):
+        if organization.pk in member_orgs(member) and role_allows(member.role, module, 'view'):
+            ids.add(member.user_id)
+    return User.objects.filter(pk__in=ids, is_active=True)
+
+
+def document_form(module, user, data=None, instance=None, active_org=None):
+    fields = list(module.fields) + ['owner']
+    if not instance or not instance.pk:
+        fields.insert(0, 'organization')
+    Form = forms.modelform_factory(module.model, fields=fields)
+    form = Form(data=data, instance=instance)
+    form.fields['version'] = forms.IntegerField(widget=forms.HiddenInput(), initial=instance.version if instance and instance.pk else 1)
+    form.fields['version'].required = bool(instance and instance.pk)
+    org = selected_org(user, module.key if module.key != 'warehouses' else 'inventory', data, instance, active_org)
+    if 'organization' in form.fields:
+        form.fields['organization'].queryset = accessible_organizations(user, module.model.module, 'create')
+        form.fields['organization'].initial = org.pk if org else None
+        form.fields['organization'].widget.attrs['data-org-select'] = 'true'
+    form.instance.organization = org
+    form.fields['owner'].queryset = responsible_users(user, module.model.module, org)
+    form.fields['owner'].initial = user.pk
+    for name, field in form.fields.items():
+        if isinstance(field, forms.ModelChoiceField) and name not in ('organization', 'owner'):
+            field.queryset = scoped(user, field.queryset.model, org.pk if org else -1)
+    if isinstance(form.instance, m.Order) and form.instance.quote_id:
+        form.fields['total'].disabled = True
+        form.fields['customer'].disabled = True
+    if isinstance(form.instance, m.ChangeRequest):
+        form.instance.order_version = 1
+        if data and data.get('order'):
+            order = form.fields['order'].queryset.filter(pk=data.get('order')).first()
+            if order:
+                form.instance.order_version = order.version
+    style_fields(form)
+    return form
+
+
+def line_form(user, document, data=None):
+    if isinstance(document, m.Quote):
+        model, fields = m.QuoteLine, ['name', 'room', 'specification', 'quantity', 'unit', 'unit_price']
+    elif isinstance(document, m.Breakdown):
+        model, fields = m.BOMLine, ['material', 'quantity', 'waste']
+    else:
+        model, fields = m.PurchaseLine, ['material', 'quantity', 'unit_price']
+    Form = forms.modelform_factory(model, fields=fields)
+    form = Form(data=data)
+    if 'material' in form.fields:
+        form.fields['material'].queryset = scoped(user, m.Material, document.organization_id)
+    form.fields['version'] = forms.IntegerField(widget=forms.HiddenInput(), initial=document.version)
+    style_fields(form)
+    return form
+
+
+class StockAdjustmentForm(forms.Form):
+    warehouse = forms.ModelChoiceField(label='仓库', queryset=m.Warehouse.objects.none())
+    material = forms.ModelChoiceField(label='物料', queryset=m.Material.objects.none())
+    quantity = forms.DecimalField(label='调整数量（负数为出库）', max_digits=12, decimal_places=3)
+    reason = forms.CharField(label='调整原因', max_length=500, widget=forms.Textarea)
+
+    def __init__(self, user, org=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['warehouse'].queryset = scoped(user, m.Warehouse, org, action='adjust')
+        self.fields['material'].queryset = scoped(user, m.Material, org)
+        style_fields(self)
+
+
+class PaymentForm(forms.Form):
+    direction = forms.ChoiceField(label='收支方向', choices=[('in', '收款'), ('out', '付款')])
+    order = forms.ModelChoiceField(label='应收订单（收款时选择）', queryset=m.Order.objects.none(), required=False)
+    purchase = forms.ModelChoiceField(label='应付采购（付款时选择）', queryset=m.Purchase.objects.none(), required=False)
+    amount = forms.DecimalField(label='本次金额', max_digits=14, decimal_places=2, min_value=0.01)
+    reference = forms.CharField(label='唯一凭证号', max_length=80)
+    paid_date = forms.DateField(label='收付日期')
+    method = forms.CharField(label='收付方式', max_length=40, initial='银行转账')
+    note = forms.CharField(label='备注', required=False, widget=forms.Textarea)
+
+    def __init__(self, user, org=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        allowed = accessible_organizations(user, 'finance', 'create')
+        self.fields['order'].queryset = scoped(user, m.Order, org).filter(organization__in=allowed).exclude(status__in=['draft', 'cancelled'])
+        self.fields['purchase'].queryset = scoped(user, m.Purchase, org).filter(organization__in=allowed, status__in=['ordered', 'received'])
+        style_fields(self)
+
+    def clean(self):
+        data = super().clean()
+        incoming = data.get('direction') == 'in'
+        if (incoming and (not data.get('order') or data.get('purchase'))) or (not incoming and (not data.get('purchase') or data.get('order'))):
+            raise ValidationError('收款只选择订单；付款只选择采购，不能同时选择。')
+        return data
