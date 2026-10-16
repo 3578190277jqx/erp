@@ -4,7 +4,7 @@ from threading import Barrier
 from unittest import skipUnless
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.db import connection,close_old_connections
+from django.db import connection,connections,close_old_connections
 from django.test import TransactionTestCase,override_settings
 from erp import models as m,services
 from erp.services.materials import reserve_production
@@ -36,7 +36,7 @@ class PostgreSQLContentionTests(TransactionTestCase):
                 barrier.wait(timeout=10)
                 try:reserve_production(actor,job,job.version);return 'reserved'
                 except ValidationError:return 'shortage'
-            finally:close_old_connections()
+            finally:connections.close_all()
         with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(compete,ids))
         self.assertCountEqual(results,['reserved','shortage'])
         stock=m.Stock.objects.get(warehouse=warehouse,material=material)

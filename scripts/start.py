@@ -36,6 +36,7 @@ def main():
         subprocess.run([str(python), 'manage.py', *command], check=True, env=env)
     if args.demo:
         subprocess.run([str(python), 'manage.py', 'seed_demo', '--credentials-file', '.demo-credentials.txt'], check=True, env=env)
+        subprocess.run([str(python), 'manage.py', 'seed_upgrade_demo'], check=True, env=env)
         print('演示账号：demo_admin。首次生成的密码保存在 .demo-credentials.txt（请勿提交）。', flush=True)
     print(f'打开 http://127.0.0.1:{args.port} ；按 Ctrl+C 停止。', flush=True)
     subprocess.run([str(python), 'manage.py', 'runserver', f'127.0.0.1:{args.port}'], env=env, check=True)

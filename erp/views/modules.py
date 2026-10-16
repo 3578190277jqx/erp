@@ -74,7 +74,8 @@ def filtered(request, module):
             except ValueError:pass
     if request.GET.get('mine')=='1':qs=qs.filter(owner=request.user)
     sorting=request.GET.get('sort','-created_at')
-    allowed={'created_at','-created_at','code','-code'}|set(module.columns)|{f'-{field}' for field in module.columns}
+    columns=set(module.columns)&{f.name for f in module.model._meta.fields}
+    allowed={'created_at','-created_at','code','-code'}|columns|{f'-{field}' for field in columns}
     if sorting not in allowed:sorting='-created_at'
     return qs.order_by(sorting,'-pk')
 
@@ -102,6 +103,7 @@ def rows_for(objects, columns):
 
 
 def label(model, field):
+    if field=='available':return '可用量'
     return model._meta.get_field(field).verbose_name
 
 
@@ -149,6 +151,9 @@ def list_records(request, key):
         context.update(finance_summary(request))
     if key == 'inventory':
         context['warehouses'] = scoped(request.user, m.Warehouse, active_org(request))
+        purchases=scoped(request.user,m.Purchase,active_org(request)).filter(status__in=['ordered','partial'])
+        context['in_transit']=m.PurchaseLine.objects.filter(purchase__in=purchases,received_qty__lt=F('quantity')).annotate(
+            remaining=F('quantity')-F('received_qty')).select_related('purchase','material','purchase__warehouse').order_by('purchase__due_date','pk')[:30]
     return render(request, 'erp/list.html', context)
 
 
@@ -235,11 +240,17 @@ def edit_record(request, key, pk=None):
             with transaction.atomic():
                 if obj:
                     # ModelForm mutates instance before saving, so lock a fresh DB copy for before-values.
+                    if isinstance(obj,m.Production):
+                        # Use the same parent -> job lock order as reserve/issue.
+                        production_order=m.Production.objects.get(pk=obj.pk).breakdown.order_id
+                        m.Order.objects.select_for_update().get(pk=production_order)
                     fresh = lock(request.user, obj, 'edit', form.cleaned_data['version'])
                     before = snapshot(fresh)
                     if not editable(fresh):
                         raise ValidationError('单据已冻结，请刷新。')
                     candidate = form.save(commit=False)
+                    if isinstance(candidate,m.Production) and candidate.warehouse_id!=fresh.warehouse_id and fresh.reservations.filter(status='active').exists():
+                        raise ValidationError('此工单已有物料预留，请先释放预留后再更换领料仓库。')
                     if isinstance(candidate,m.Purchase) and candidate.supplier_record_id:candidate.supplier=candidate.supplier_record.name
                     if isinstance(candidate, m.Material) and candidate.unit != fresh.unit and m.StockMovement.objects.filter(material=candidate).exists():
                         raise ValidationError('已有库存流水的物料不能改变计量单位。')

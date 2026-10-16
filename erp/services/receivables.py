@@ -16,7 +16,7 @@ def create_plan(user,order,version,first_due,percentages):
     if not can(user,'finance','create',order.organization_id) and not can(user,'changes','approve',order.organization_id):
         raise PermissionDenied('收款计划由财务或管理人员设置。')
     order=m.Order.objects.select_for_update().get(pk=order.pk)
-    if order.version != int(version) or order.payment_plans.exists() or order.kind!='sale' or order.status=='cancelled':
+    if order.version != int(version) or order.payment_plans.exists() or order.kind!='sale' or order.status!='confirmed' or order.total<=0:
         raise ValidationError('订单版本变化、已有计划或订单类型不支持。')
     ratios=[number(x,places=2,positive=True) for x in percentages]
     if len(ratios)!=3 or sum(ratios)!=100:
@@ -45,6 +45,8 @@ def plan_rows(order):
 def check_gate(order,gate):
     plans=list(order.payment_plans.all())
     if not plans:return
+    if sum((plan.amount for plan in plans),Decimal(0))!=order.total:
+        raise ValidationError('分期合计与合同金额不一致，请由财务核对后继续。')
     paid=order.payment_set.aggregate(s=Sum('amount'))['s'] or Decimal(0)
     cumulative=Decimal(0)
     for plan in plans:

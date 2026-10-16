@@ -61,3 +61,25 @@ class ExecutionUpgradeTests(ERPTestCase):
         order2 = self.make(m.Order,customer=self.customer,title='尾差',total=Decimal('1000.01'),status='confirmed')
         receivables.create_plan(self.manager,order2,order2.version,date.today(),[33,33,34])
         self.assertEqual(sum(order2.payment_plans.values_list('amount',flat=True)),Decimal('1000.01'))
+
+    def test_reserved_job_cannot_switch_warehouse_through_edit_form(self):
+        services.adjust_stock(self.admin,self.warehouse,self.board,10,'期初')
+        production=self.production()
+        materials.reserve_production(self.admin,production,production.version)
+        production.refresh_from_db()
+        other=self.make(m.Warehouse,name='另一个仓库')
+        self.client.force_login(self.admin)
+        response=self.client.post(f'/modules/production/{production.pk}/edit/',{'version':production.version,'owner':self.admin.pk,
+                                  'warehouse':other.pk,'work_center':'一线','start_date':'2026-11-01','due_date':'2026-11-10','note':''})
+        self.assertEqual(response.status_code,200)
+        production.refresh_from_db();self.assertEqual(production.warehouse_id,self.warehouse.pk)
+
+    def test_draft_plan_cannot_freeze_a_smaller_contract_amount(self):
+        order=self.order(status='draft')
+        with self.assertRaises(ValidationError):receivables.create_plan(self.manager,order,order.version,date.today(),[30,40,30])
+        self.assertFalse(order.payment_plans.exists())
+        order.status='confirmed';order.save()
+        receivables.create_plan(self.manager,order,order.version,date.today(),[30,40,30])
+        m.Order.objects.filter(pk=order.pk).update(total=2000)
+        order.refresh_from_db()
+        with self.assertRaises(ValidationError):receivables.check_gate(order,'start')

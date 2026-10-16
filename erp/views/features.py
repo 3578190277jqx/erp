@@ -27,12 +27,13 @@ def feature_context(request,obj):
             net=sum((line.line_total for line in obj.lines.all()),Decimal(0))
             cost=sum((pricing.rounded(line.billable_quantity*line.unit_cost) for line in obj.lines.all()),Decimal(0))
             amounts={'net':net,'tax':pricing.rounded(net*obj.tax_rate),'cost':cost,'margin':net-cost}
+            context['snapshot_mismatch']=obj.total!=net+amounts['tax']
             context['order_lines']=obj.lines.all()
         context['amounts']=amounts
         context['show_costs']=can(request.user,'finance','view',obj.organization_id)
     if isinstance(obj,m.Order):
         context['plans']=receivables.plan_rows(obj)
-        context['can_plan']=obj.kind=='sale' and not obj.payment_plans.exists() and (
+        context['can_plan']=obj.kind=='sale' and obj.status=='confirmed' and not obj.payment_plans.exists() and (
             can(request.user,'finance','create',obj.organization_id) or can(request.user,'changes','approve',obj.organization_id))
         context['handoff']=m.Handoff.objects.filter(order=obj).first()
         context['can_handoff']=obj.kind=='sale' and obj.status=='confirmed' and scoped(request.user,m.Order,action='edit').filter(pk=obj.pk).exists() and not context['handoff']

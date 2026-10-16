@@ -42,7 +42,7 @@ register('production', m.Production, '生产工单', '生产工单', '计划有�
 register('purchases', m.Purchase, '采购管理', '采购订单', '让合适的物料，在合适的时间到位。', 'cart', '制造与供应',
          'code supplier warehouse total due_date status', 'supplier_record supplier warehouse due_date note')
 register('inventory', m.Stock, '库存查询', '库存', '每一件物料，都有准确的位置。', 'warehouse', '制造与供应',
-         'code material warehouse quantity reserved updated_at', '', False)
+         'code material warehouse quantity reserved available updated_at', '', False)
 register('warehouses', m.Warehouse, '仓库管理', '仓库', '分仓管理，清晰追踪。', 'warehouse', '制造与供应',
          'code name address organization', 'name address note')
 register('movements', m.StockMovement, '库存流水', '库存流水', '从收货到领料，每一次变化都有凭证。', 'activity', '制造与供应',
@@ -76,7 +76,7 @@ register('receipts',m.PurchaseReceipt,'采购收货凭证','收货凭证','记�
 def editable(obj):
     if type(obj) in READ_ONLY:
         return False
-    if isinstance(obj, m.Customer) or isinstance(obj, (m.Material, m.Warehouse)):
+    if isinstance(obj, (m.Customer,m.Material,m.Warehouse,m.Supplier)):
         return True
     if isinstance(obj, m.Measurement) and obj.status == 'in_progress':
         return True
