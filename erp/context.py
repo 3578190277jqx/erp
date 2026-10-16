@@ -1,0 +1,2 @@
+def workspace(request):
+    return {}
