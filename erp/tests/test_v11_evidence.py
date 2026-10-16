@@ -54,7 +54,6 @@ class EvidenceCollaborationTests(ERPTestCase):
             response=self.client.get(f'/attachments/{item.pk}/download/')
             self.assertEqual(response.status_code,200)
             self.assertEqual(b''.join(response.streaming_content),b'%PDF-1.7\nfixture')
-            response.close()
             self.assertEqual(response['Cache-Control'],'private, no-store')
             self.assertEqual(Client().get(f'/attachments/{item.pk}/download/').status_code,302)
             self.assertEqual(self.client.get('/media/'+item.file.name).status_code,404)
