@@ -53,6 +53,16 @@ class SecondReviewPricingTests(ERPTestCase):
         self.assertEqual(change.lines.count(),1)
         change.refresh_from_db();self.assertEqual(change.proposed_total,0)
 
+    def test_zero_discount_gift_with_non_discounted_fee_can_confirm(self):
+        quote=self.make(m.Quote,customer=self.customer,title='赠品方案',discount=0)
+        for values in [dict(name='赠送柜体',quantity=1,unit_price=1000),dict(name='运费',quantity=1,unit_price=200,discountable=False)]:
+            services.add_line(self.admin,quote,values,quote.version);quote.refresh_from_db()
+        for action in ('submit','approve','accept'):
+            services.transition(self.admin,quote,action,quote.version);quote.refresh_from_db()
+        order=m.Order.objects.get(quote=quote);order.contract_number='GIFT';order.due_date=date(2026,12,1);order.save()
+        services.transition(self.admin,order,'confirm',order.version)
+        order.refresh_from_db();self.assertEqual(order.status,'confirmed');self.assertEqual(order.discount,0);self.assertEqual(order.total,200)
+
 
 class SecondReviewCollaborationTests(ERPTestCase):
     def setUp(self):

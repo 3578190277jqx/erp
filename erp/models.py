@@ -215,7 +215,7 @@ class Order(Record):
     contract_number = models.CharField('合同编号', max_length=80, blank=True)
     due_date = models.DateField('承诺交期', null=True, blank=True)
     total = money_field('合同金额')
-    discount = models.DecimalField('合同折扣快照',max_digits=5,decimal_places=4,default=1,validators=[MinValueValidator(Decimal('.01')),MaxValueValidator(1)])
+    discount = models.DecimalField('合同折扣快照',max_digits=5,decimal_places=4,default=1,validators=[MinValueValidator(0),MaxValueValidator(1)])
     tax_rate = models.DecimalField('税率', max_digits=5, decimal_places=4, default=0, validators=[MinValueValidator(0),MaxValueValidator(1)])
     kind = models.CharField('订单类型', max_length=20, default='sale', choices=[('sale','销售订单'),('manufacturing','工厂生产订单')])
     source_handoff = models.OneToOneField('Handoff', verbose_name='来源交接', null=True, blank=True,
