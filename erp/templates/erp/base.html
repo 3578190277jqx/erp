@@ -44,7 +44,7 @@
   <main id="main" class="main" tabindex="-1">
     {% if messages %}<div class="messages" aria-live="polite">{% for message in messages %}<div class="notice {{ message.tags }}" role="{% if message.tags == 'error' %}alert{% else %}status{% endif %}">{% icon 'check' %}<span>{{ message }}</span><button type="button" class="dismiss" aria-label="关闭提示">×</button></div>{% endfor %}</div>{% endif %}
     {% block content %}{% endblock %}
-    <footer class="page-footer"><span>栖木 · 让家居经营更从容</span><span>{% if demo_mode %}演示环境 · 虚构业务数据{% else %}业务数据实时计算{% endif %} <i></i> v1.1</span></footer>
+    <footer class="page-footer"><span>栖木 · 让家居经营更从容</span><span>{% if demo_mode %}演示环境 · 虚构业务数据{% else %}业务数据实时计算{% endif %} <i></i> v1.1.1</span></footer>
   </main>
 </div>
 <nav class="mobile-tabs" aria-label="移动端快捷导航"><a href="{% url 'dashboard' %}">{% icon 'grid' %}<span>工作台</span></a><a href="{% url 'reports' %}">{% icon 'chart' %}<span>看板</span></a><a href="{% url 'organizations' %}">{% icon 'users' %}<span>组织</span></a><button type="button" data-open-nav>{% icon 'menu' %}<span>全部</span></button></nav>
