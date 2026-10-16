@@ -194,10 +194,12 @@ def detail(request, key, pk):
     context['related'] = related
     context['new_related'] = []
     for target, parent_field in [('measurements', 'customer'), ('designs', 'customer'), ('quotes', 'customer'),
-                                 ('breakdowns', 'order'), ('deliveries', 'order'), ('installations', 'order'), ('aftersales', 'order'), ('changes', 'order')]:
+                                 ('followups','customer'), ('breakdowns', 'order'), ('deliveries', 'order'), ('installations', 'order'), ('aftersales', 'order'), ('changes', 'order')]:
         target_module = MODULES[target]
         parent_model = target_module.model._meta.get_field(parent_field).related_model
         if isinstance(obj, parent_model) and can(request.user, target_module.model.module, 'create', obj.organization_id):
+            if isinstance(obj,m.Order) and (obj.source_handoff_id and target=='changes' or target=='breakdowns' and m.Handoff.objects.filter(order=obj,status__in=['sent','accepted','completed']).exists()):
+                continue
             context['new_related'].append({'module': target_module, 'field': parent_field})
     if isinstance(obj, (m.Order, m.Purchase)):
         if can(request.user, 'finance', 'view', obj.organization_id):
@@ -211,9 +213,13 @@ def detail(request, key, pk):
 def validate_creation(obj):
     if isinstance(obj, m.Breakdown) and obj.order.status != 'confirmed':
         raise ValidationError('只有已确认订单可以拆单。')
+    if isinstance(obj,m.Breakdown) and m.Handoff.objects.filter(order=obj.order,status__in=['sent','accepted','completed']).exists():
+        raise ValidationError('此订单已交接，请由工厂在本地生产订单上拆单。')
     if isinstance(obj, m.ChangeRequest):
         if obj.order.status not in ('confirmed', 'producing', 'ready', 'shipping', 'installing') or not obj.note.strip():
             raise ValidationError('请选择履约中的订单，并填写变更原因。')
+        if obj.order.source_handoff_id:
+            raise ValidationError('工厂生产订单的交接快照不可通过本地变更修订。')
         obj.order_version = obj.order.version
 
 

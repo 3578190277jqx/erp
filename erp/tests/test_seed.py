@@ -13,10 +13,12 @@ class SeedTests(ERPTestCase):
         self.assertIn('seed_demo', get_commands(), 'Demo seed command must be implemented')
         output = io.StringIO()
         call_command('seed_demo', stdout=output)
+        call_command('seed_upgrade_demo', stdout=output)
         counts = {key: mod.model.objects.count() for key, mod in MODULES.items()}
         user = User.objects.get(username='demo_admin')
         original = user.password
         call_command('seed_demo', stdout=output)
+        call_command('seed_upgrade_demo', stdout=output)
         self.assertEqual(original, User.objects.get(username='demo_admin').password)
         self.assertEqual(counts, {key: mod.model.objects.count() for key, mod in MODULES.items()})
         self.assertGreater(m.Order.objects.count(), 5)
@@ -24,6 +26,7 @@ class SeedTests(ERPTestCase):
     def test_seeded_record_details_and_forms_render(self):
         self.assertIn('seed_demo', get_commands(), 'Demo seed command must be implemented')
         call_command('seed_demo', stdout=io.StringIO())
+        call_command('seed_upgrade_demo', stdout=io.StringIO())
         self.client.force_login(User.objects.get(username='demo_admin'))
         for key, mod in MODULES.items():
             obj = mod.model.objects.first()

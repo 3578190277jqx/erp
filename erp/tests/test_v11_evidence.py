@@ -41,3 +41,39 @@ class EvidenceCollaborationTests(ERPTestCase):
         self.assertFalse(scoped(planner,m.Order).filter(pk=order.pk).exists())
         with self.assertRaises(ValidationError):
             collaboration.accept_handoff(planner,handoff,handoff.version)
+
+    def test_attachment_download_rechecks_assignment_and_has_no_public_url(self):
+        from django.test import Client
+        from erp import services
+        customer=self.make(m.Customer,name='负责客户',phone='123',owner=self.sales)
+        membership=m.Membership.objects.get(user=self.sales);membership.scope='own';membership.save()
+        with TemporaryDirectory() as folder,override_settings(MEDIA_ROOT=folder):
+            file=SimpleUploadedFile('证据.pdf',b'%PDF-1.7\nfixture')
+            item=evidence.upload_attachment(self.sales,customer,file,'drawing')
+            self.client.force_login(self.sales)
+            response=self.client.get(f'/attachments/{item.pk}/download/')
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(b''.join(response.streaming_content),b'%PDF-1.7\nfixture')
+            response.close()
+            self.assertEqual(response['Cache-Control'],'private, no-store')
+            self.assertEqual(Client().get(f'/attachments/{item.pk}/download/').status_code,302)
+            self.assertEqual(self.client.get('/media/'+item.file.name).status_code,404)
+            customer.owner=self.admin;customer.save()
+            self.assertEqual(self.client.get(f'/attachments/{item.pk}/download/').status_code,403)
+            oversized=SimpleUploadedFile('big.pdf',b'%PDF-1.7');oversized.size=evidence.MAX_BYTES+1
+            with self.assertRaises(ValidationError):evidence.upload_attachment(self.admin,customer,oversized,'drawing')
+
+    def test_factory_order_cannot_cancel_or_change_frozen_handoff_products(self):
+        from erp import services
+        from datetime import date
+        factory=m.Organization.objects.create(name='冻结工厂',kind='factory')
+        order=self.order(status='confirmed')
+        m.OrderLine.objects.create(order=order,name='柜体',quantity=1,unit_price=1000,line_total=1000)
+        handoff=collaboration.send_handoff(self.admin,order,factory,order.version)
+        local=collaboration.accept_handoff(self.admin,handoff,handoff.version)
+        with self.assertRaises(ValidationError):services.transition(self.admin,local,'cancel',local.version,'不能丢失已接单')
+        change=m.ChangeRequest.objects.create(organization=factory,owner=self.admin,order=local,order_version=local.version,
+                                              proposed_total=100,proposed_due_date=date(2026,12,1),note='不得旁路修改')
+        factory_manager=User.objects.create_user('factory_manager')
+        m.Membership.objects.create(user=factory_manager,organization=factory,role='manager',scope='org')
+        with self.assertRaises(ValidationError):services.transition(factory_manager,change,'approve',change.version)

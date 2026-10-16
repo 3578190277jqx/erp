@@ -30,3 +30,5 @@
 @media(max-width:700px){.feature-inputs,.commercial-totals{grid-template-columns:repeat(2,minmax(0,1fr))}.feature-form{padding:18px}.feature-form .btn{width:100%}.advanced-filters>div{right:auto;left:0}.inline-actions{display:grid}.commercial-totals strong{font-size:19px}}
 
 .attachment-list>a{display:flex;align-items:center;gap:14px;padding:15px 0;border-bottom:1px solid var(--line)}.attachment-list>a>div{flex:1;min-width:0;overflow-wrap:anywhere}.attachment-list strong,.attachment-list small{display:block}.attachment-list small{font-size:11px;color:var(--muted);margin-top:5px}
+
+.list-panel+section.panel{margin-top:24px}

@@ -63,6 +63,8 @@ def prerequisites(user, obj, action, note):
     if isinstance(obj, (m.Quote, m.Purchase, m.Breakdown)) and action in ('submit', 'release') and not obj.lines.exists():
         raise ValidationError('至少添加一条明细后再提交。')
     if isinstance(obj, m.Order):
+        if action=='cancel' and obj.source_handoff_id:
+            raise ValidationError('已接单的工厂生产订单不能单边取消，请先协调源门店处理生产交接。')
         if action == 'confirm' and (not obj.contract_number.strip() or not obj.due_date or obj.total <= 0):
             raise ValidationError('确认前请补齐合同编号、交期及有效合同金额。')
         if action == 'cancel' and m.Breakdown.objects.filter(order=obj, status='released').exists():
@@ -93,6 +95,8 @@ def prerequisites(user, obj, action, note):
         if obj.requested_by_id == user.pk or (last_editor and last_editor.owner_id == user.pk):
             raise ValidationError('申请人不能审批自己的变更。')
         order = m.Order.objects.select_for_update().get(pk=obj.order_id)
+        if order.source_handoff_id:
+            raise ValidationError('工厂订单来自冻结的交接快照，不能单边修改产品与合同。')
         if order.version != obj.order_version:
             raise ValidationError('订单版本已变化，请重新申请变更。')
         if order.status not in ('confirmed', 'producing', 'ready', 'shipping', 'installing'):

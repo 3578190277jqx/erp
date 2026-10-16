@@ -49,6 +49,7 @@ def feature_context(request,obj):
         context['can_accept']=obj.status=='sent' and can(request.user,'handoffs','accept',obj.target_organization_id)
     if isinstance(obj,m.Design):
         context['can_revision']=scoped(request.user,m.Design,action='edit').filter(pk=obj.pk).exists()
+        context['design_versions']=scoped(request.user,m.Design).filter(family_id=obj.family_id).order_by('-revision')[:20]
     if isinstance(obj,m.ChangeRequest):
         context['change_lines']=obj.lines.select_related('order_line').all()
         form=forms.modelform_factory(m.ChangeLine,fields=['operation','order_line','name','room','specification','quantity','unit','unit_price','unit_cost'])()

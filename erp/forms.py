@@ -97,6 +97,10 @@ def line_form(user, document, data=None):
         model, fields = m.PurchaseLine, ['material', 'quantity', 'unit_price']
     Form = forms.modelform_factory(model, fields=fields)
     form = Form(data=data)
+    if isinstance(document,m.Quote):
+        form.fields['quantity'].help_text='按尺寸计价填件数；展开面积填实测㎡；数量和套餐填套数。'
+        form.fields['width_mm'].help_text='投影面积填宽度；延米填长度，单位为mm。'
+        form.fields['unit'].help_text='投影 / 展开面积填㎡，延米填m，费用项可填项。'
     if 'material' in form.fields:
         form.fields['material'].queryset = scoped(user, m.Material, document.organization_id)
     if 'unit_cost' in form.fields:
