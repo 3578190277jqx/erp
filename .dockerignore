@@ -1,0 +1,11 @@
+.git
+.venv
+__pycache__
+*.sqlite3*
+.secret-key
+.demo-credentials.txt
+.env
+staticfiles
+output
+.superpowers
+.playwright-cli

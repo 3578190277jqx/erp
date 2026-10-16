@@ -6,6 +6,7 @@ __pycache__/
 *.sqlite3-*
 .env
 .secret-key
+.demo-credentials.txt
 staticfiles/
 media/
 node_modules/
