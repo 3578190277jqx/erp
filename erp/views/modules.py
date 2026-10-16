@@ -15,7 +15,7 @@ from django.views.decorators.http import require_POST
 from erp import models as m
 from erp.forms import document_form, line_form, StockAdjustmentForm, PaymentForm
 from erp.permissions import can, scoped
-from erp.registry import MODULES, editable
+from erp.registry import MODULES, RELATED_MODULES, editable
 from erp.services import transition, add_line, adjust_stock, record_payment, available_actions
 from erp.services.common import lock, snapshot, save_version, audit
 
@@ -188,12 +188,8 @@ def detail(request, key, pk):
                         'line_form': line_form(request.user, obj),
                         'can_lines': obj.status in ('draft', 'rejected') and scoped(request.user, module.model, action='edit').filter(pk=obj.pk).exists()})
     related = []
-    for other in MODULES.values():
-        if other.key in ('audit', 'movements', 'inventory', 'warehouses'):
-            continue
-        for field in other.model._meta.fields:
-            if isinstance(field, m.models.ForeignKey) and field.related_model == type(obj):
-                related.extend({'module': other, 'obj': child} for child in scoped(request.user, other.model).filter(**{field.name: obj})[:8])
+    for other,field in RELATED_MODULES.get(type(obj),[]):
+        related.extend({'module':other,'obj':child} for child in scoped(request.user,other.model).filter(**{field:obj})[:8])
     context['related'] = related
     context['new_related'] = []
     for target, parent_field in [('measurements', 'customer'), ('designs', 'customer'), ('quotes', 'customer'),

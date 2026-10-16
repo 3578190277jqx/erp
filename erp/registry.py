@@ -81,3 +81,12 @@ def editable(obj):
     if isinstance(obj, m.Measurement) and obj.status == 'in_progress':
         return True
     return getattr(obj, 'status', None) in ('draft', 'rejected', 'pending', 'planned', 'assigned', 'failed', 'new')
+
+
+# Relationship metadata is static for this registry, so inspect it once at import.
+RELATED_MODULES={}
+for child in MODULES.values():
+    if child.key in ('audit','movements','inventory','warehouses'):continue
+    for field in child.model._meta.fields:
+        if isinstance(field,m.models.ForeignKey):
+            RELATED_MODULES.setdefault(field.related_model,[]).append((child,field.name))

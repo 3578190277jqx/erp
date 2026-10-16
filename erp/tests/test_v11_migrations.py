@@ -39,3 +39,34 @@ class HistoricalUpgradeTests(TransactionTestCase):
         self.assertEqual(m.PurchaseLine.objects.get(pk=row.pk).received_qty,10)
         self.assertEqual(m.StockMovement.objects.count(),0)
         self.assertEqual(len(set(m.Design.objects.values_list('family_id',flat=True))),2)
+
+    def test_v11_pending_changes_and_factory_placeholders_upgrade_without_data_loss(self):
+        executor=MigrationExecutor(connection);old=('erp','0007_backfill_execution_history');executor.migrate([old])
+        apps=executor.loader.project_state([old]).apps
+        user=apps.get_model('auth','User').objects.create(username='v11-history',password='!')
+        Org=apps.get_model('erp','Organization');source=Org.objects.create(name='历史源店');factory=Org.objects.create(name='历史厂',kind='factory')
+        Customer=apps.get_model('erp','Customer');Order=apps.get_model('erp','Order');Handoff=apps.get_model('erp','Handoff')
+        customer=Customer.objects.create(code='V11-C',organization=source,owner=user,name='客户',phone='123')
+        orders=[]
+        for i in range(2):
+            order=Order.objects.create(code=f'V11-S{i}',organization=source,owner=user,customer=customer,title='销售',total=1000,status='confirmed')
+            handoff=Handoff.objects.create(code=f'V11-H{i}',organization=source,owner=user,order=order,target_organization=factory,payload={},status='accepted')
+            partner=Customer.objects.create(code=f'V11-P{i}',organization=factory,owner=user,name='历史源店 · 生产协作',phone='内部协作',source='门厂交接')
+            Order.objects.create(code=f'V11-F{i}',organization=factory,owner=user,customer=partner,title='工厂',total=0,kind='manufacturing',source_handoff=handoff,status='confirmed')
+            orders.append(order)
+        Change=apps.get_model('erp','ChangeRequest');Line=apps.get_model('erp','ChangeLine')
+        for i,status in enumerate(['pending','approved']):
+            change=Change.objects.create(code=f'V11-CH{i}',organization=source,owner=user,requested_by=user,order=orders[i],order_version=1,
+                                         proposed_total=1500,proposed_due_date='2026-12-01',status=status,note='旧版增项')
+            Line.objects.create(change=change,operation='add',name='旧增项',quantity=1,unit_price=500)
+        MigrationExecutor(connection).migrate([self.latest])
+        from erp import models as m
+        self.assertEqual(m.Customer.objects.filter(is_internal=True).count(),2)
+        self.assertEqual(m.Customer.objects.filter(internal_source_id=source.pk).count(),1)
+        self.assertEqual(len(set(m.Order.objects.filter(kind='manufacturing').values_list('customer_id',flat=True))),1)
+        self.assertEqual(m.Customer.objects.count(),3)
+        self.assertEqual(m.ChangeRequest.objects.get(code='V11-CH0').status,'rejected')
+        self.assertEqual(m.ChangeRequest.objects.get(code='V11-CH1').status,'approved')
+        self.assertEqual(m.ChangeLine.objects.count(),2)
+        self.assertEqual(m.CollaborationRoute.objects.count(),0)
+        self.assertTrue(m.AuditEvent.objects.filter(action='upgrade_change_review').exists())
