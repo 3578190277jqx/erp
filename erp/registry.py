@@ -68,4 +68,6 @@ def editable(obj):
         return False
     if isinstance(obj, m.Customer) or isinstance(obj, (m.Material, m.Warehouse)):
         return True
+    if isinstance(obj, m.Measurement) and obj.status == 'in_progress':
+        return True
     return getattr(obj, 'status', None) in ('draft', 'rejected', 'pending', 'planned', 'assigned', 'failed', 'new')

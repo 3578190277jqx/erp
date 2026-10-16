@@ -21,7 +21,8 @@ class ERPTestCase(TestCase):
         self.hinge = self.make(m.Material, name='缓冲铰链', unit='件', unit_cost=10)
 
     def make(self, model, **kwargs):
-        return model.objects.create(organization=self.org, owner=self.admin, **kwargs)
+        owner = kwargs.pop('owner', self.admin)
+        return model.objects.create(organization=self.org, owner=owner, **kwargs)
 
     def order(self, **kwargs):
         return self.make(m.Order, customer=self.customer, title='全屋定制', total=1000,

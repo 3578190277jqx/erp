@@ -9,6 +9,7 @@ services:
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
       DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-}
       DJANGO_SSL_REDIRECT: ${DJANGO_SSL_REDIRECT:-true}
+      DJANGO_TRUSTED_PROXY: ${DJANGO_TRUSTED_PROXY:-}
     volumes:
       - erp-data:/data
     restart: unless-stopped

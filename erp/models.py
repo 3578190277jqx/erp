@@ -345,8 +345,15 @@ class ChangeRequest(Record):
     proposed_total = money_field('变更后金额')
     proposed_due_date = models.DateField('变更后交期')
     order_version = models.PositiveIntegerField('申请时订单版本', editable=False)
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name='申请人',
+                                     on_delete=models.PROTECT, related_name='+', editable=False)
     status = models.CharField('审批状态', max_length=20, default='pending', choices=[
         ('pending', '待审批'), ('approved', '已批准'), ('rejected', '已驳回')])
+
+    def save(self, *args, **kwargs):
+        if not self.pk and not self.requested_by_id:
+            self.requested_by_id = self.owner_id
+        super().save(*args, **kwargs)
 
 
 class AuditEvent(models.Model):

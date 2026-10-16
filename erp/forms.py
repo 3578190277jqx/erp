@@ -48,6 +48,9 @@ def responsible_users(user, module, organization):
 
 def document_form(module, user, data=None, instance=None, active_org=None):
     fields = list(module.fields) + ['owner']
+    result_entry = isinstance(instance, m.Measurement) and instance.status == 'in_progress'
+    if result_entry:
+        fields = ['area', 'note']
     if not instance or not instance.pk:
         fields.insert(0, 'organization')
     Form = forms.modelform_factory(module.model, fields=fields)
@@ -60,8 +63,10 @@ def document_form(module, user, data=None, instance=None, active_org=None):
         form.fields['organization'].initial = org.pk if org else None
         form.fields['organization'].widget.attrs['data-org-select'] = 'true'
     form.instance.organization = org
-    form.fields['owner'].queryset = responsible_users(user, module.model.module, org)
-    form.fields['owner'].initial = user.pk
+    if 'owner' in form.fields:
+        form.fields['owner'].queryset = responsible_users(user, module.model.module, org)
+        form.fields['owner'].initial = user.pk
+        form.fields['owner'].label_from_instance = lambda person: f'{person.first_name or person.username} · {person.username}'
     for name, field in form.fields.items():
         if isinstance(field, forms.ModelChoiceField) and name not in ('organization', 'owner'):
             field.queryset = scoped(user, field.queryset.model, org.pk if org else -1)

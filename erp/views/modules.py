@@ -74,6 +74,11 @@ def display_value(obj, field):
         return '—'
     if hasattr(obj, f'get_{field}_display'):
         return getattr(obj, f'get_{field}_display')()
+    if field in ('owner', 'requested_by'):
+        return value.first_name or value.username
+    if field == 'action':
+        from erp.templatetags.ui import action_name
+        return action_name(value)
     if isinstance(value, Decimal):
         return f'¥{value:,.2f}' if field in ('total', 'amount', 'unit_price', 'unit_cost', 'proposed_total') else f'{value:,.3f}'.rstrip('0').rstrip('.')
     if hasattr(value, 'strftime'):
@@ -132,7 +137,11 @@ def list_records(request, key):
 def detail(request, key, pk):
     module = module_for(key)
     obj = record_for(request, module, pk)
-    fields = ['organization', 'owner', *module.fields]
+    fields = ['organization', 'owner', *module.columns, *module.fields]
+    if isinstance(obj, m.ChangeRequest):
+        fields.append('requested_by')
+    if isinstance(obj, m.AuditEvent):
+        fields.extend(['before', 'after'])
     fields = list(dict.fromkeys(fields))
     info = [{'label': label(module.model, name), 'value': display_value(obj, name)} for name in fields]
     context = {'module': module, 'obj': obj, 'info': info,
@@ -219,6 +228,8 @@ def edit_record(request, key, pk=None):
                 else:
                     candidate = form.save(commit=False)
                     validate_creation(candidate)
+                    if isinstance(candidate, m.ChangeRequest):
+                        candidate.requested_by = request.user
                     candidate.full_clean(exclude=['code'])
                     candidate.save()
                     audit(request.user, candidate, 'create')

@@ -18,17 +18,32 @@
   document.querySelectorAll('[data-close-dialog]').forEach(el => el.addEventListener('click', () => el.closest('dialog').close()));
   document.querySelectorAll('dialog').forEach(dialog => dialog.addEventListener('click', e => { if (e.target === dialog) { const box = dialog.getBoundingClientRect(); if (e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom) dialog.close(); } }));
   const workflow = document.querySelector('#workflow-dialog');
-  document.querySelectorAll('[data-workflow]').forEach(el => el.addEventListener('click', () => {
-    document.querySelector('#workflow-form').action = el.dataset.url;
-    document.querySelector('#workflow-action').value = el.dataset.action;
-    document.querySelector('#workflow-version').value = el.dataset.version;
-    document.querySelector('#workflow-title').textContent = `确认${el.dataset.label}？`;
-    const required = ['fail', 'reject', 'cancel', 'close', 'resolve', 'complete'].includes(el.dataset.action);
+  const openWorkflow = data => {
+    document.querySelector('#workflow-form').action = data.url;
+    document.querySelector('#workflow-action').value = data.action;
+    document.querySelector('#workflow-version').value = data.version;
+    document.querySelector('#workflow-title').textContent = `确认${data.label}？`;
+    const required = ['fail', 'reject', 'cancel', 'close', 'resolve', 'complete'].includes(data.action);
     document.querySelector('#workflow-note').required = required;
     document.querySelector('#workflow-note').value = '';
     document.querySelector('#workflow-required').textContent = required ? ' *' : '（选填）';
     workflow.showModal();
-  }));
+  };
+  document.querySelectorAll('[data-workflow]').forEach(el => el.addEventListener('click', () => openWorkflow(el.dataset)));
+  let dragging = null;
+  document.querySelectorAll('.kanban-card[draggable="true"]').forEach(card => {
+    card.addEventListener('dragstart', e => { dragging = card; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', card.href); card.classList.add('is-dragging'); });
+    card.addEventListener('dragend', () => { dragging = null; card.classList.remove('is-dragging'); document.querySelectorAll('.drop-ready').forEach(el => el.classList.remove('drop-ready')); });
+  });
+  document.querySelectorAll('[data-drop-status]').forEach(column => {
+    column.addEventListener('dragover', e => { if (dragging && JSON.parse(dragging.dataset.transitions)[column.dataset.dropStatus]) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; column.classList.add('drop-ready'); } });
+    column.addEventListener('dragleave', e => { if (!column.contains(e.relatedTarget)) column.classList.remove('drop-ready'); });
+    column.addEventListener('drop', e => {
+      e.preventDefault(); column.classList.remove('drop-ready'); if (!dragging) return;
+      const next = JSON.parse(dragging.dataset.transitions)[column.dataset.dropStatus];
+      if (next) openWorkflow({ ...next, url: dragging.dataset.url, version: dragging.dataset.version });
+    });
+  });
   const confirm = document.querySelector('#confirm-dialog');
   let pendingForm = null;
   document.querySelectorAll('form[data-confirm]').forEach(form => form.addEventListener('submit', e => {

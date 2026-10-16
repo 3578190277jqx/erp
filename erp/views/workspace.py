@@ -1,4 +1,5 @@
 import calendar
+import json
 from datetime import date
 from decimal import Decimal
 from django.contrib import messages
@@ -62,6 +63,7 @@ def dashboard(request):
         'recent_orders': orders.select_related('customer', 'owner')[:5], 'months': months,
         'chart_points': points, 'stages': stages, 'new_module': MODULES.get(first_module),
         'completed_count': orders.filter(status='completed').count(),
+        'completion_percent': round(orders.filter(status='completed').count() / total_count * 100),
         'quote_count': quotes.count(), 'can_see_orders': can(request.user, 'orders', 'view', active_org(request)),
     })
 
@@ -91,9 +93,18 @@ def schedule(request):
         from django.core.exceptions import PermissionDenied
         raise PermissionDenied
     qs = scoped_model(request, m.Production).select_related('owner', 'breakdown__order').order_by('start_date', 'id')
+    from erp.services import available_actions
+    from erp.services.workflows import TRANSITIONS
     columns = []
     for status, label in m.Production._meta.get_field('status').choices:
-        columns.append({'status': status, 'label': label, 'objects': list(qs.filter(status=status))})
+        objects = list(qs.filter(status=status))
+        for obj in objects:
+            actions = {TRANSITIONS[m.Production][action][1]: {'action': action, 'label': text}
+                       for action, text in available_actions(obj)
+                       if scoped(request.user, m.Production, action=action).filter(pk=obj.pk).exists()}
+            obj.ui_transitions = json.dumps(actions, ensure_ascii=False)
+            obj.ui_draggable = bool(actions)
+        columns.append({'status': status, 'label': label, 'objects': objects})
     return render(request, 'erp/schedule.html', {'columns': columns, 'scheduled': qs.exclude(start_date=None)})
 
 

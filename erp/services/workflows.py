@@ -3,6 +3,7 @@ from django.db import transaction
 from erp import models as m
 from .common import lock, snapshot, save_version, audit, system_update
 from .stock import receive_purchase, issue_production
+from erp.permissions import require_access
 
 # Each action has a single legal source and target; prerequisites live below.
 TRANSITIONS = {
@@ -35,7 +36,14 @@ ACTION_LABELS = {'contact': '开始跟进', 'measure': '进入量尺', 'design':
 
 
 def available_actions(obj):
-    return [(action, ACTION_LABELS[action]) for action, (sources, target) in TRANSITIONS.get(type(obj), {}).items()
+    labels = {
+        m.Measurement: {'start': '开始量尺', 'complete': '提交量尺结果'},
+        m.Production: {'start': '开始生产', 'complete': '确认完工'},
+        m.Delivery: {'assign': '确认派车'},
+        m.Installation: {'start': '开始安装', 'complete': '完成安装验收'},
+        m.AfterSales: {'start': '开始处理'},
+    }.get(type(obj), {})
+    return [(action, labels.get(action, ACTION_LABELS[action])) for action, (sources, target) in TRANSITIONS.get(type(obj), {}).items()
             if obj.status in (sources if isinstance(sources, tuple) else (sources,))]
 
 
@@ -59,6 +67,10 @@ def prerequisites(user, obj, action, note):
         raise ValidationError('订单必须已确认且尚未开工。')
     if isinstance(obj, m.Production) and action == 'plan' and (not obj.start_date or not obj.due_date or not obj.warehouse_id):
         raise ValidationError('排程需选择领料仓库、开工和完工日期。')
+    if isinstance(obj, m.Production):
+        expected_order_status = 'producing' if action == 'complete' else 'confirmed'
+        if obj.breakdown.order.status != expected_order_status:
+            raise ValidationError('订单状态已变化，不能继续当前生产操作。')
     if isinstance(obj, m.Delivery) and action == 'ship':
         if obj.order.status != 'ready':
             raise ValidationError('订单尚未生产完工，不能发运。')
@@ -67,7 +79,8 @@ def prerequisites(user, obj, action, note):
     if isinstance(obj, m.Installation) and action == 'start' and obj.order.status != 'installing':
         raise ValidationError('订单必须已配送签收后才能开始安装。')
     if isinstance(obj, m.ChangeRequest) and action == 'approve':
-        if obj.owner_id == user.pk:
+        last_editor = m.AuditEvent.objects.filter(object_type='changes', object_id=obj.pk, action='edit').first()
+        if obj.requested_by_id == user.pk or (last_editor and last_editor.owner_id == user.pk):
             raise ValidationError('申请人不能审批自己的变更。')
         order = m.Order.objects.select_for_update().get(pk=obj.order_id)
         if order.version != obj.order_version:
@@ -108,6 +121,20 @@ def effects(user, obj, action):
 
 @transaction.atomic
 def transition(user, obj, action, version, note=''):
+    require_access(user, obj, action)
+    # Order cancellation and all fulfillment operations serialize on the same
+    # parent row before child locks. PostgreSQL row locks protect cancel/release;
+    # SQLite additionally uses compare-and-swap on every versioned write.
+    fresh = type(obj).objects.get(pk=obj.pk)
+    order_id = None
+    if isinstance(fresh, m.Order):
+        order_id = fresh.pk
+    elif isinstance(fresh, (m.Breakdown, m.Delivery, m.Installation, m.AfterSales, m.ChangeRequest)):
+        order_id = fresh.order_id
+    elif isinstance(fresh, m.Production):
+        order_id = fresh.breakdown.order_id
+    if order_id:
+        m.Order.objects.select_for_update().get(pk=order_id)
     obj = lock(user, obj, action, version)
     rule = TRANSITIONS.get(type(obj), {}).get(action)
     if not rule:

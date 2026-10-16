@@ -83,12 +83,37 @@ def scoped(user, model, organization=None, action='view'):
                 continue
             condition = Q(organization_id__in=member_orgs(member))
             if member.scope == 'own':
-                condition &= Q(owner=user)
+                own = Q(owner=user)
+                # A field worker must be able to read the parent of an assigned
+                # task. Related access grants read/export only, never edit rights.
+                paths = {
+                    ('customers', 'surveyor'): ['measurement__owner'],
+                    ('customers', 'designer'): ['design__owner', 'quote__owner'],
+                    ('customers', 'installer'): ['order__installation__owner'],
+                    ('customers', 'logistics'): ['order__delivery__owner'],
+                    ('orders', 'installer'): ['installation__owner'],
+                    ('orders', 'logistics'): ['delivery__owner'],
+                    ('orders', 'designer'): ['customer__design__owner'],
+                    ('measurements', 'sales'): ['customer__owner'],
+                    ('measurements', 'dealer'): ['customer__owner'],
+                    ('measurements', 'designer'): ['customer__design__owner'],
+                    ('designs', 'sales'): ['customer__owner'],
+                    ('designs', 'dealer'): ['customer__owner'],
+                    ('quotes', 'designer'): ['design__owner'],
+                    ('deliveries', 'sales'): ['order__owner'],
+                    ('deliveries', 'dealer'): ['order__owner'],
+                    ('installations', 'sales'): ['order__owner'],
+                    ('installations', 'dealer'): ['order__owner'],
+                }
+                if action in ('view', 'export'):
+                    for path in paths.get((model.module, member.role), []):
+                        own |= Q(**{path: user})
+                condition &= own
             predicate |= condition
         qs = qs.filter(predicate)
     if org_id:
         qs = qs.filter(organization_id=org_id)
-    return qs
+    return qs.distinct()
 
 
 def accessible_organizations(user, module=None, action='view'):

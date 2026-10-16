@@ -23,4 +23,5 @@ def workspace(request):
             'current_organization': current, 'active_organization': selected,
             'role_label': '系统管理员' if request.user.is_superuser else ' / '.join(dict.fromkeys(m.get_role_display() for m in memberships)),
             'user_display': request.user.first_name or request.user.username,
-            'can_schedule': can(request.user, 'production', 'view', selected)}
+            'can_schedule': can(request.user, 'production', 'view', selected),
+            'demo_mode': request.user.username.startswith('demo_')}

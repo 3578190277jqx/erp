@@ -56,3 +56,15 @@ def tone(status):
     if status in ('failed', 'rejected', 'cancelled', 'lost'):
         return 'red'
     return 'blue'
+
+
+@register.filter
+def action_name(action):
+    from erp.services.workflows import ACTION_LABELS
+    labels = {'create': '新建记录', 'edit': '编辑信息', 'add_line': '添加明细', 'delete_line': '移除明细',
+              'stock_adjustment': '库存调整', 'record_payment': '登记收付款', 'export': '导出数据',
+              'approved_change': '批准订单变更', 'quote_accepted': '报价成交',
+              'production_started': '生产开工', 'production_completed': '生产完工',
+              'delivery_shipped': '订单发运', 'delivery_received': '配送签收',
+              'installation_completed': '安装验收', 'demo_create': '初始化示例记录', 'demo_seed': '演示初始化完成'}
+    return labels.get(action, ACTION_LABELS.get(action, action))
