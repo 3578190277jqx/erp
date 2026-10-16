@@ -36,6 +36,12 @@ ROLE_WRITE = {
 
 
 def role_allows(role, module, action):
+    if module == 'receipts':
+        return action in ('view','export') and 'purchases' in ROLE_READ.get(role,set())
+    if module == 'suppliers':
+        return 'purchases' in ROLE_READ.get(role,set()) if action in ('view','export') else role in ('boss','manager','buyer')
+    if module == 'followups':
+        return role_allows(role,'customers',action)
     if module == 'handoffs':
         return role in ('boss','manager','sales','dealer','planner','engineer') if action in ('view','export') else role in ('boss','manager','planner')
     if action in ('view', 'export'):
@@ -62,7 +68,15 @@ def descendants(org_id):
 
 
 def member_orgs(member):
-    return descendants(member.organization_id) if member.scope == 'tree' else {member.organization_id}
+    if not hasattr(member,'_scope_orgs'):
+        member._scope_orgs=descendants(member.organization_id) if member.scope == 'tree' else {member.organization_id}
+    return member._scope_orgs
+
+
+def memberships(user):
+    if hasattr(user,'_erp_memberships'):
+        return user._erp_memberships
+    return Membership.objects.filter(user=user).select_related('organization')
 
 
 def can(user, module, action='view', organization=None):
@@ -72,7 +86,7 @@ def can(user, module, action='view', organization=None):
         return True
     org_id = getattr(organization, 'pk', organization)
     return any(role_allows(m.role, module, action) and (org_id is None or org_id in member_orgs(m))
-               for m in Membership.objects.filter(user=user))
+               for m in memberships(user))
 
 
 def scoped(user, model, organization=None, action='view'):
@@ -82,7 +96,7 @@ def scoped(user, model, organization=None, action='view'):
     org_id = getattr(organization, 'pk', organization)
     if not user.is_superuser:
         predicate = Q(pk__in=[])
-        for member in Membership.objects.filter(user=user):
+        for member in memberships(user):
             if not role_allows(member.role, model.module, action):
                 continue
             condition = Q(organization_id__in=member_orgs(member))
@@ -129,7 +143,7 @@ def accessible_organizations(user, module=None, action='view'):
     if user.is_superuser:
         return Organization.objects.all()
     ids = set()
-    for member in Membership.objects.filter(user=user):
+    for member in memberships(user):
         if module is None or role_allows(member.role, module, action):
             ids.update(member_orgs(member))
     return Organization.objects.filter(pk__in=ids)

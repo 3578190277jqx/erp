@@ -9,7 +9,7 @@ def style_fields(form):
     for name, field in form.fields.items():
         if isinstance(field.widget, forms.HiddenInput):
             continue
-        field.widget.attrs['class'] = 'form-select' if isinstance(field.widget, forms.Select) else 'form-control'
+        field.widget.attrs['class'] = 'form-check-input' if isinstance(field.widget,forms.CheckboxInput) else ('form-select' if isinstance(field.widget, forms.Select) else 'form-control')
         if isinstance(field, forms.DateField):
             field.widget = forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date', 'class': 'form-control'})
         if isinstance(field.widget, forms.Textarea):
@@ -55,6 +55,10 @@ def document_form(module, user, data=None, instance=None, active_org=None):
         fields.insert(0, 'organization')
     Form = forms.modelform_factory(module.model, fields=fields)
     form = Form(data=data, instance=instance)
+    if isinstance(form.instance,m.Design):
+        form.fields['revision'].disabled=True
+    if isinstance(form.instance,m.Purchase):
+        form.fields['supplier'].required=False
     form.fields['version'] = forms.IntegerField(widget=forms.HiddenInput(), initial=instance.version if instance and instance.pk else 1)
     form.fields['version'].required = bool(instance and instance.pk)
     org = selected_org(user, module.key if module.key != 'warehouses' else 'inventory', data, instance, active_org)
@@ -85,15 +89,21 @@ def document_form(module, user, data=None, instance=None, active_org=None):
 
 def line_form(user, document, data=None):
     if isinstance(document, m.Quote):
-        model, fields = m.QuoteLine, ['name', 'room', 'specification', 'quantity', 'unit', 'unit_price']
+        model, fields = m.QuoteLine, ['name','room','specification','category','pricing_mode','width_mm','height_mm',
+                                    'quantity','unit','unit_price','unit_cost','discountable']
     elif isinstance(document, m.Breakdown):
-        model, fields = m.BOMLine, ['material', 'quantity', 'waste']
+        model, fields = m.BOMLine, ['order_line','material', 'quantity', 'waste']
     else:
         model, fields = m.PurchaseLine, ['material', 'quantity', 'unit_price']
     Form = forms.modelform_factory(model, fields=fields)
     form = Form(data=data)
     if 'material' in form.fields:
         form.fields['material'].queryset = scoped(user, m.Material, document.organization_id)
+    if 'unit_cost' in form.fields:
+        from .permissions import can
+        if not can(user,'finance','view',document.organization_id):form.fields.pop('unit_cost')
+    if 'order_line' in form.fields:
+        form.fields['order_line'].queryset=document.order.lines.all()
     form.fields['version'] = forms.IntegerField(widget=forms.HiddenInput(), initial=document.version)
     style_fields(form)
     return form
@@ -126,7 +136,7 @@ class PaymentForm(forms.Form):
         super().__init__(*args, **kwargs)
         allowed = accessible_organizations(user, 'finance', 'create')
         self.fields['order'].queryset = scoped(user, m.Order, org).filter(organization__in=allowed).exclude(status__in=['draft', 'cancelled'])
-        self.fields['purchase'].queryset = scoped(user, m.Purchase, org).filter(organization__in=allowed, status__in=['ordered', 'received'])
+        self.fields['purchase'].queryset = scoped(user, m.Purchase, org).filter(organization__in=allowed, status__in=['ordered','partial', 'received'])
         style_fields(self)
 
     def clean(self):

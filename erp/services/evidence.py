@@ -36,6 +36,8 @@ def upload_attachment(user,parent,file,kind):
                         original_name=name,kind=kind,size=len(content),sha256=hashlib.sha256(content).hexdigest())
     try:
         with transaction.atomic():
+            parent = type(parent).objects.select_for_update().get(pk=parent.pk)
+            require_access(user,parent,'edit')
             item.file.save(name,file,save=False)
             item.full_clean(exclude=['code'])
             item.save()

@@ -77,6 +77,7 @@ class Record(models.Model):
     class Meta:
         abstract = True
         ordering = ['-created_at']
+        indexes = [models.Index(fields=['organization','created_at'],name='%(class)s_org_ct')]
 
     def save(self, *args, **kwargs):
         if not self.code:
@@ -300,6 +301,10 @@ class Production(Record):
         ('pending', '待排程'), ('planned', '已排程'), ('issued', '已领料'),
         ('in_progress', '生产中'), ('completed', '已完工')])
 
+    class Meta(Record.Meta):
+        indexes = [*Record.Meta.indexes,models.Index(fields=['organization','status','due_date'],name='production_org_status_due')]
+        constraints = [models.CheckConstraint(condition=models.Q(start_date__isnull=True)|models.Q(due_date__isnull=True)|models.Q(start_date__lte=models.F('due_date')),name='valid_production_dates')]
+
     def clean(self):
         super().clean()
         if self.start_date and self.due_date and self.start_date > self.due_date:
@@ -447,6 +452,7 @@ class AuditEvent(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [models.Index(fields=['organization','code','created_at'],name='audit_org_code_time')]
 
 
 class ChangeLine(models.Model):

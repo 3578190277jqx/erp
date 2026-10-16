@@ -51,3 +51,18 @@ class CommercialUpgradeTests(ERPTestCase):
         order.refresh_from_db()
         self.assertEqual(order.total,Decimal('1400'))
         self.assertEqual(list(order.lines.values_list('name',flat=True)),['新柜体'])
+
+    def test_approval_rejects_tampered_total_and_keeps_product_history(self):
+        order = self.order(status='confirmed')
+        old = m.OrderLine.objects.create(order=order,name='旧柜体',quantity=1,unit_price=1000,line_total=1000)
+        change = self.make(m.ChangeRequest,order=order,order_version=order.version,proposed_total=1000,
+                           proposed_due_date=date(2026,12,1),note='替换柜体')
+        services.add_change_line(self.admin,change,{'operation':'update','order_line':old,'name':'改后柜体','quantity':1,'unit_price':1200},change.version)
+        change.refresh_from_db()
+        m.ChangeRequest.objects.filter(pk=change.pk).update(proposed_total=900)
+        with self.assertRaises(ValidationError):services.transition(self.manager,change,'approve',change.version)
+        m.ChangeRequest.objects.filter(pk=change.pk).update(proposed_total=1200)
+        services.transition(self.manager,change,'approve',change.version)
+        event=m.AuditEvent.objects.get(object_type='orders',object_id=order.pk,action='change_products')
+        self.assertEqual(event.before['lines'][0]['name'],'旧柜体')
+        self.assertEqual(event.after['lines'][0]['name'],'改后柜体')

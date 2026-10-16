@@ -5,7 +5,8 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction, IntegrityError, OperationalError
-from django.db.models import Q, Sum
+from django.db.models import Q, Sum, F, OuterRef, Subquery, DecimalField, Value
+from django.db.models.functions import Coalesce
 from django.http import Http404, HttpResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.urls import reverse
@@ -65,7 +66,17 @@ def filtered(request, module):
     if request.GET.get('overdue') == '1' and 'due_date' in [f.name for f in module.model._meta.fields]:
         from django.utils import timezone
         qs = qs.filter(due_date__lt=timezone.localdate()).exclude(status__in=['completed', 'cancelled', 'closed', 'received', 'delivered', 'lost'])
-    return qs
+    from datetime import date
+    for param,lookup in [('date_from','created_at__date__gte'),('date_to','created_at__date__lte')]:
+        value=request.GET.get(param,'')
+        if value:
+            try:qs=qs.filter(**{lookup:date.fromisoformat(value)})
+            except ValueError:pass
+    if request.GET.get('mine')=='1':qs=qs.filter(owner=request.user)
+    sorting=request.GET.get('sort','-created_at')
+    allowed={'created_at','-created_at','code','-code'}|set(module.columns)|{f'-{field}' for field in module.columns}
+    if sorting not in allowed:sorting='-created_at'
+    return qs.order_by(sorting,'-pk')
 
 
 def display_value(obj, field):
@@ -96,19 +107,22 @@ def label(model, field):
 
 def finance_summary(request):
     orders = scoped(request.user, m.Order, active_org(request)).exclude(status__in=['draft', 'cancelled'])
-    purchases = scoped(request.user, m.Purchase, active_org(request)).filter(status__in=['ordered', 'received'])
+    purchases = scoped(request.user, m.Purchase, active_org(request)).filter(status__in=['ordered', 'partial', 'received'])
     payments = scoped(request.user, m.Payment, active_org(request))
     receivables = []
     payables = []
+    totals=[]
     for qs, key, target in [(orders, 'order', receivables), (purchases, 'purchase', payables)]:
-        totals = dict(payments.filter(**{f'{key}__isnull': False}).values(key).annotate(s=Sum('amount')).values_list(key, 's'))
-        for document in qs:
-            paid = totals.get(document.pk, Decimal('0'))
-            target.append({'object': document, 'total': document.total, 'paid': paid, 'balance': document.total - paid,
+        payment_total=payments.filter(**{key:OuterRef('pk')}).order_by().values(key).annotate(s=Sum('amount')).values('s')
+        currency=DecimalField(max_digits=14,decimal_places=2)
+        qs=qs.annotate(paid_value=Coalesce(Subquery(payment_total,output_field=currency),Value(Decimal(0)),output_field=currency))
+        qs=qs.annotate(balance_value=F('total')-F('paid_value'))
+        totals.append(qs.aggregate(s=Sum('balance_value'))['s'] or Decimal(0))
+        for document in qs.order_by('due_date','pk')[:50]:
+            target.append({'object': document, 'total': document.total, 'paid': document.paid_value, 'balance': document.balance_value,
                            'module': 'orders' if key == 'order' else 'purchases'})
     return {'receivables': receivables, 'payables': payables,
-            'receivable_total': sum((x['balance'] for x in receivables), Decimal('0')),
-            'payable_total': sum((x['balance'] for x in payables), Decimal('0'))}
+            'receivable_total': totals[0], 'payable_total': totals[1]}
 
 
 @login_required
@@ -116,7 +130,9 @@ def list_records(request, key):
     module = module_for(key)
     authorize(request, module)
     qs = filtered(request, module)
-    page = Paginator(qs, 15).get_page(request.GET.get('page'))
+    page_size=request.GET.get('page_size','15')
+    page_size=int(page_size) if page_size in ('10','15','30','50') else 15
+    page = Paginator(qs, page_size).get_page(request.GET.get('page'))
     statuses = module.model._meta.get_field('status').choices if any(f.name == 'status' for f in module.model._meta.fields) else []
     context = {'module': module, 'page_obj': page, 'rows': rows_for(page, module.columns),
                'headers': [label(module.model, f) for f in module.columns], 'statuses': statuses,
@@ -125,7 +141,10 @@ def list_records(request, key):
                'can_pay': key == 'finance' and can(request.user, 'finance', 'create', active_org(request)),
                'batch_actions': [(a, name) for a, name in [('approve', '批量批准'), ('assign', '批量派工')]
                                  if can(request.user, module.model.module, a, active_org(request)) and statuses],
-               'query_string': request.GET.urlencode(), 'q': request.GET.get('q', ''), 'selected_status': request.GET.get('status', '')}
+               'query_string': request.GET.urlencode(), 'q': request.GET.get('q', ''), 'selected_status': request.GET.get('status', ''),
+               'can_import':key in ('customers','materials') and can(request.user,key,'create',active_org(request)),
+               'page_size':str(page_size),'page_sizes':['10','15','30','50'],'sort':request.GET.get('sort','-created_at')}
+    params=request.GET.copy();params.pop('page',None);context['pagination_query']=params.urlencode()
     if key == 'finance':
         context.update(finance_summary(request))
     if key == 'inventory':
@@ -151,10 +170,10 @@ def detail(request, key, pk):
                'actions': [(a, text) for a, text in available_actions(obj) if scoped(request.user, module.model, action=a).filter(pk=obj.pk).exists()] if hasattr(obj, 'status') else [],
                'events': m.AuditEvent.objects.filter(organization=obj.organization, code=obj.code)[:12]}
     if isinstance(obj, (m.Quote, m.Purchase, m.Breakdown)):
-        cols = {'quotes': ('name', 'room', 'specification', 'quantity', 'unit', 'unit_price', 'subtotal'),
-                'purchases': ('material', 'quantity', 'unit_price', 'subtotal'),
-                'breakdowns': ('material', 'quantity', 'waste', 'required')}[key]
-        names = {'subtotal': '小计', 'required': '含损耗总需求'}
+        cols = {'quotes': ('name', 'room', 'specification', 'pricing_mode', 'billable_quantity', 'unit', 'unit_price', 'subtotal'),
+                'purchases': ('material', 'quantity', 'received_qty', 'unit_price', 'subtotal'),
+                'breakdowns': ('order_line','material', 'quantity', 'waste', 'required')}[key]
+        names = {'subtotal': '小计', 'required': '含损耗总需求', 'billable_quantity':'计价数量'}
         model = obj.lines.model
         context.update({'line_rows': rows_for(obj.lines.all(), cols),
                         'line_headers': [names.get(c) or label(model, c) for c in cols],
@@ -179,6 +198,8 @@ def detail(request, key, pk):
         if can(request.user, 'finance', 'view', obj.organization_id):
             paid = scoped(request.user, m.Payment).filter(**{'order' if isinstance(obj, m.Order) else 'purchase': obj}).aggregate(s=Sum('amount'))['s'] or 0
             context.update({'paid': paid, 'balance': obj.total - paid})
+    from .features import feature_context
+    context.update(feature_context(request,obj))
     return render(request, 'erp/detail.html', context)
 
 
@@ -219,6 +240,7 @@ def edit_record(request, key, pk=None):
                     if not editable(fresh):
                         raise ValidationError('单据已冻结，请刷新。')
                     candidate = form.save(commit=False)
+                    if isinstance(candidate,m.Purchase) and candidate.supplier_record_id:candidate.supplier=candidate.supplier_record.name
                     if isinstance(candidate, m.Material) and candidate.unit != fresh.unit and m.StockMovement.objects.filter(material=candidate).exists():
                         raise ValidationError('已有库存流水的物料不能改变计量单位。')
                     if isinstance(candidate, m.Quote):
@@ -228,12 +250,16 @@ def edit_record(request, key, pk=None):
                     audit(request.user, candidate, 'edit', before)
                 else:
                     candidate = form.save(commit=False)
+                    if isinstance(candidate,m.Purchase) and candidate.supplier_record_id:candidate.supplier=candidate.supplier_record.name
                     validate_creation(candidate)
                     if isinstance(candidate, m.ChangeRequest):
                         candidate.requested_by = request.user
                     candidate.full_clean(exclude=['code'])
                     candidate.save()
                     audit(request.user, candidate, 'create')
+                    if isinstance(candidate,m.FollowUp) and candidate.next_date:
+                        from erp.services.common import system_update
+                        system_update(request.user,candidate.customer,'followup',due_date=candidate.next_date)
             messages.success(request, '已保存，所有更改均已记录。')
             return redirect('detail', key=key, pk=candidate.pk)
         except BUSINESS_ERRORS as exc:
@@ -313,8 +339,9 @@ def export(request, key):
     for obj in objects:
         values = [display_value(obj, field) for field in module.columns]
         writer.writerow(["'" + v if v.lstrip().startswith(('=', '+', '-', '@', '\t', '\r')) else v for v in values])
-    if objects and not isinstance(objects[0], m.AuditEvent):
-        audit(request.user, objects[0], 'export', after={'rows': len(objects)})
+    for org_id in set(obj.organization_id for obj in objects):
+        m.AuditEvent.objects.create(organization_id=org_id,owner=request.user,object_type='system',object_id=0,code='CSV-EXPORT',
+                                   action='export',after={'module':key,'rows':sum(1 for obj in objects if obj.organization_id==org_id)})
     return response
 
 

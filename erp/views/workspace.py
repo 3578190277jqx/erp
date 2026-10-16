@@ -5,6 +5,7 @@ from decimal import Decimal
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Sum, F
+from django.db.models.functions import TruncMonth
 from django.shortcuts import render, redirect
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -30,40 +31,50 @@ def dashboard(request):
     order_value = orders.exclude(status='draft').aggregate(s=Sum('total'))['s'] or Decimal('0')
     tasks = []
     risk = []
+    task_count = risk_count = 0
     for key in ['measurements', 'designs', 'quotes', 'breakdowns', 'production', 'purchases', 'deliveries', 'installations', 'aftersales', 'changes']:
         module = MODULES[key]
         qs = scoped_model(request, module.model).exclude(status__in=DONE)
-        for obj in qs[:20]:
+        task_count += qs.count()
+        if any(field.name=='due_date' for field in module.model._meta.fields):
+            risk_qs=qs.filter(due_date__lt=today)
+            risk_count+=risk_qs.count()
+            for obj in risk_qs.select_related('owner').order_by('due_date','pk')[:5]:
+                risk.append({'obj':obj,'module':module,'due':obj.due_date})
+            qs=qs.order_by('due_date','pk')
+        for obj in qs.select_related('owner')[:7]:
             item = {'obj': obj, 'module': module, 'due': getattr(obj, 'due_date', None)}
             tasks.append(item)
-            if item['due'] and item['due'] < today:
-                risk.append(item)
     tasks.sort(key=lambda t: (t['due'] or date.max, -t['obj'].pk))
-    for order in open_orders.filter(due_date__lt=today)[:6]:
+    risk_count += open_orders.filter(due_date__lt=today).count()
+    for order in open_orders.filter(due_date__lt=today).select_related('owner').order_by('due_date','pk')[:5]:
         risk.append({'obj': order, 'module': MODULES['orders'], 'due': order.due_date})
+    risk.sort(key=lambda t:(t['due'],t['obj'].pk))
     months = []
+    month_totals={(row['month'].year,row['month'].month):row['amount'] for row in orders.exclude(status='draft').annotate(month=TruncMonth('created_at')).values('month').annotate(amount=Sum('total')).order_by()}
     for offset in range(5, -1, -1):
         index = today.year * 12 + today.month - 1 - offset
         year, month0 = divmod(index, 12)
-        amount = orders.filter(created_at__year=year, created_at__month=month0 + 1).exclude(status='draft').aggregate(s=Sum('total'))['s'] or 0
+        amount = month_totals.get((year,month0+1),0)
         months.append({'label': f'{month0 + 1}月', 'amount': amount})
     maximum = max([x['amount'] for x in months] + [1])
     points = ' '.join(f'{35 + i * 100},{180 - float(item["amount"] / maximum) * 130:.1f}' for i, item in enumerate(months))
     stages = []
-    total_count = max(orders.count(), 1)
+    state_counts=dict(orders.values('status').annotate(n=Count('pk')).values_list('status','n'))
+    total_count = max(sum(state_counts.values()), 1)
     for status, name in m.Order._meta.get_field('status').choices:
-        count = orders.filter(status=status).count()
+        count = state_counts.get(status,0)
         if count:
             stages.append({'name': name, 'count': count, 'width': max(5, round(count / total_count * 100)), 'status': status})
     first_module = next((key for key in ('customers', 'measurements', 'designs', 'quotes', 'purchases', 'installations', 'aftersales')
                          if can(request.user, MODULES[key].model.module, 'create', active_org(request))), None)
     return render(request, 'erp/dashboard.html', {
-        'today': today, 'order_value': order_value, 'open_count': open_orders.count(), 'task_count': len(tasks),
-        'customer_count': customers.count(), 'tasks': tasks[:7], 'risks': risk[:5], 'risk_count': len(risk),
+        'today': today, 'order_value': order_value, 'open_count': open_orders.count(), 'task_count': task_count,
+        'customer_count': customers.count(), 'tasks': tasks[:7], 'risks': risk[:5], 'risk_count': risk_count,
         'recent_orders': orders.select_related('customer', 'owner')[:5], 'months': months,
         'chart_points': points, 'stages': stages, 'new_module': MODULES.get(first_module),
-        'completed_count': orders.filter(status='completed').count(),
-        'completion_percent': round(orders.filter(status='completed').count() / total_count * 100),
+        'completed_count': state_counts.get('completed',0),
+        'completion_percent': round(state_counts.get('completed',0) / total_count * 100),
         'quote_count': quotes.count(), 'can_see_orders': can(request.user, 'orders', 'view', active_org(request)),
     })
 
@@ -78,10 +89,13 @@ def reports(request):
         fields = [f.name for f in module.model._meta.fields]
         counts = []
         if 'status' in fields:
+            state_counts=dict(qs.values('status').annotate(n=Count('pk')).values_list('status','n'))
             for status, label in module.model._meta.get_field('status').choices:
-                counts.append({'label': label, 'count': qs.filter(status=status).count()})
-        modules.append({'module': module, 'count': qs.count(), 'states': counts})
-    context = {'report_modules': modules, 'low_stock': scoped_model(request, m.Stock).filter(quantity__lt=F('material__safety_stock')).select_related('material', 'warehouse')[:20]}
+                counts.append({'label': label, 'count': state_counts.get(status,0)})
+            count=sum(state_counts.values())
+        else:count=qs.count()
+        modules.append({'module': module, 'count': count, 'states': counts})
+    context = {'report_modules': modules, 'low_stock': scoped_model(request, m.Stock).filter(quantity__lt=F('reserved')+F('material__safety_stock')).select_related('material', 'warehouse')[:20]}
     if can(request.user, 'finance', 'view', active_org(request)):
         context.update(finance_summary(request))
     return render(request, 'erp/reports.html', context)

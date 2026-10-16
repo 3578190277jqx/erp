@@ -1,5 +1,5 @@
 from collections import OrderedDict
-from .permissions import accessible_organizations, can
+from .permissions import accessible_organizations, can, memberships
 from .registry import MODULES
 
 
@@ -18,10 +18,10 @@ def workspace(request):
             continue
         if can(request.user, module.model.module, 'view', selected):
             groups.setdefault(module.group, []).append(module)
-    memberships = request.user.memberships.select_related('organization').all()
+    members = memberships(request.user)
     return {'nav_groups': groups.items(), 'workspace_orgs': organizations,
             'current_organization': current, 'active_organization': selected,
-            'role_label': '系统管理员' if request.user.is_superuser else ' / '.join(dict.fromkeys(m.get_role_display() for m in memberships)),
+            'role_label': '系统管理员' if request.user.is_superuser else ' / '.join(dict.fromkeys(m.get_role_display() for m in members)),
             'user_display': request.user.first_name or request.user.username,
             'can_schedule': can(request.user, 'production', 'view', selected),
             'demo_mode': request.user.username.startswith('demo_')}

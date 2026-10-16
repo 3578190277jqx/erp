@@ -49,7 +49,9 @@ def available_actions(obj):
 
 def prerequisites(user, obj, action, note):
     from .receivables import check_gate
-    if isinstance(obj,m.Production) and action=='start':check_gate(obj.breakdown.order,'start')
+    if isinstance(obj,m.Production) and action=='start':
+        order = obj.breakdown.order
+        check_gate(order.source_handoff.order if order.source_handoff_id else order,'start')
     if isinstance(obj,m.Delivery) and action=='ship':check_gate(obj.order,'ship')
     if isinstance(obj,m.Installation) and action=='complete':check_gate(obj.order,'complete')
     if action in ('fail', 'reject', 'cancel', 'close', 'resolve') and not note.strip():
@@ -100,8 +102,15 @@ def prerequisites(user, obj, action, note):
             raise ValidationError('变更金额不能少于已收款。')
         if obj.proposed_total != order.total and order.payment_plans.exists():
             raise ValidationError('已有分期计划的订单不可只改合同额，请先由财务处理计划修订。')
-        if m.Handoff.objects.filter(order=order,status__in=['sent','accepted']).exists():
+        if m.Handoff.objects.filter(order=order,status__in=['sent','accepted','completed']).exists():
             raise ValidationError('订单已交接工厂，请先解决交接后再修改。')
+        if obj.lines.exists():
+            from .pricing import proposed_lines, rounded
+            if m.Breakdown.objects.filter(order=order).exists():
+                raise ValidationError('订单已进入拆单，不能直接修改产品，请先处理生产变更。')
+            net = sum((line['line_total'] for line in proposed_lines(obj).values()), 0)
+            if obj.proposed_total != net + rounded(net*order.tax_rate):
+                raise ValidationError('变更总额与产品增减项不一致，请重新核对。')
         if order.lines.exists() and not obj.lines.exists() and obj.proposed_total != order.total:
             raise ValidationError('有产品明细的订单必须通过增减项计算变更金额。')
 
@@ -137,7 +146,7 @@ def effects(user, obj, action):
         system_update(user, obj.order, 'installation_completed', status='completed')
     elif isinstance(obj, m.ChangeRequest) and action == 'approve':
         from .pricing import apply_change_lines
-        apply_change_lines(obj)
+        apply_change_lines(user,obj)
         system_update(user, obj.order, 'approved_change', total=obj.proposed_total, due_date=obj.proposed_due_date)
 
 

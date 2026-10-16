@@ -2,8 +2,11 @@ from django.contrib import admin
 from django.contrib.auth import views as auth
 from django.urls import path
 from erp.views import modules as v, workspace as w
+from erp.views import features as f
+from erp.views.health import health
 
 urlpatterns = [
+    path('healthz/',health,name='health'),
     path('admin/', admin.site.urls),
     path('login/', auth.LoginView.as_view(template_name='erp/login.html'), name='login'),
     path('logout/', auth.LogoutView.as_view(), name='logout'),
@@ -21,4 +24,9 @@ urlpatterns = [
     path('modules/<slug:key>/<int:pk>/edit/', v.edit_record, name='edit'),
     path('modules/<slug:key>/<int:pk>/action/', v.act, name='action'),
     path('modules/<slug:key>/<int:pk>/lines/', v.lines, name='lines'),
+    path('modules/<slug:key>/<int:pk>/print/',f.print_record,name='print_record'),
+    path('features/<slug:key>/<int:pk>/<slug:operation>/',f.feature_action,name='feature_action'),
+    path('attachments/<slug:key>/<int:pk>/upload/',f.upload,name='upload'),
+    path('attachments/<int:pk>/download/',f.download,name='download'),
+    path('imports/<slug:key>/',f.import_csv,name='import_csv'),
 ]

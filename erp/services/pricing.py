@@ -73,9 +73,10 @@ def add_change_line(user, change, values, version):
     return change
 
 
-def apply_change_lines(change):
+def apply_change_lines(user,change):
     # Historical rows are retained via before/after audit snapshots; protected BOM
     # anchors prevent dropping products that already drove manufacturing.
+    before = {'lines':[snapshot(line) for line in change.order.lines.all()]}
     for line in change.lines.all():
         if line.operation == 'remove':
             line.order_line.delete()
@@ -86,3 +87,5 @@ def apply_change_lines(change):
                 m.OrderLine.objects.filter(pk=line.order_line_id).update(**values,pricing_mode='quantity',width_mm=0,height_mm=0)
             else:
                 m.OrderLine.objects.create(order=change.order,**values)
+    audit(user,change.order,'change_products',before=before,
+          after={'change':change.code,'lines':[snapshot(line) for line in change.order.lines.all()]})

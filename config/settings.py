@@ -21,6 +21,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware', 'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware', 'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware', 'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'erp.middleware.PermissionContextMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware', 'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 ROOT_URLCONF = 'config.urls'
@@ -73,3 +74,6 @@ if not DEBUG:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
 CSRF_TRUSTED_ORIGINS = [v for v in os.getenv('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',') if v]
+LOGGING = {'version':1,'disable_existing_loggers':False,
+           'handlers':{'console':{'class':'logging.StreamHandler'}},
+           'root':{'handlers':['console'],'level':'WARNING'}}
