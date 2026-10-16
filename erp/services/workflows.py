@@ -151,7 +151,9 @@ def effects(user, obj, action):
     elif isinstance(obj, m.ChangeRequest) and action == 'approve':
         from .pricing import apply_change_lines
         apply_change_lines(user,obj)
-        system_update(user, obj.order, 'approved_change', total=obj.proposed_total, due_date=obj.proposed_due_date)
+        updated=system_update(user, obj.order, 'approved_change', total=obj.proposed_total, due_date=obj.proposed_due_date)
+        from .receivables import reschedule_plan
+        reschedule_plan(user,updated)
 
 
 @transaction.atomic

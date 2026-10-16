@@ -54,7 +54,7 @@ register('installations', m.Installation, '安装派工', '安装任务', '让�
 register('aftersales', m.AfterSales, '售后工单', '售后工单', '每一份反馈，都得到认真回应。', 'support', '交付与服务',
          'code title order priority due_date status owner', 'order title priority due_date note')
 register('finance', m.Payment, '财务对账', '收付款', '资金往来清楚，经营心中有数。', 'wallet', '经营与设置',
-         'code direction order purchase amount reference paid_date', '', False)
+         'code direction order purchase plan amount reference paid_date', '', False)
 register('changes', m.ChangeRequest, '变更审批', '变更申请', '变化被看见，决定可追溯。', 'check', '经营与设置',
          'code order proposed_total proposed_due_date status owner', 'order proposed_total proposed_due_date note')
 register('audit', m.AuditEvent, '操作日志', '审计事件', '谁，在什么时候，做了什么。', 'activity', '经营与设置',

@@ -85,7 +85,10 @@ def accept_handoff(user,handoff,version,reject=False,note=''):
     return order
 
 
+@transaction.atomic
 def return_progress(user,factory_order,status):
+    if status not in ('producing','ready'):
+        raise ValidationError('仅支持开工或完工回传。')
     if not factory_order.source_handoff_id:
         return
     handoff = m.Handoff.objects.select_for_update().get(pk=factory_order.source_handoff_id)

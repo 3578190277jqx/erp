@@ -6,7 +6,7 @@ from django.test import TransactionTestCase
 
 
 class HistoricalUpgradeTests(TransactionTestCase):
-    latest=('erp','0009_backfill_second_review')
+    latest=('erp','0010_receivable_allocation_private_evidence')
 
     def tearDown(self):
         MigrationExecutor(connection).migrate([self.latest])

@@ -16,6 +16,7 @@ urlpatterns = [
     path('organizations/', w.organizations, name='organizations'),
     path('organizations/switch/', w.switch_organization, name='switch_organization'),
     path('inventory/adjust/', v.inventory_adjust, name='inventory_adjust'),
+    path('finance/order-plans/',f.payment_plan_choices,name='payment_plan_choices'),
     path('modules/<slug:key>/', v.list_records, name='list'),
     path('modules/<slug:key>/new/', v.edit_record, name='create'),
     path('modules/<slug:key>/export/', v.export, name='export'),
@@ -28,5 +29,6 @@ urlpatterns = [
     path('features/<slug:key>/<int:pk>/<slug:operation>/',f.feature_action,name='feature_action'),
     path('attachments/<slug:key>/<int:pk>/upload/',f.upload,name='upload'),
     path('attachments/<int:pk>/download/',f.download,name='download'),
+    path('attachments/<int:pk>/delete/',f.delete_attachment,name='delete_attachment'),
     path('imports/<slug:key>/',f.import_csv,name='import_csv'),
 ]

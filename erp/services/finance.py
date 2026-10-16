@@ -7,7 +7,7 @@ from .common import number, audit, save_version
 
 
 @transaction.atomic
-def record_payment(user, document, amount, reference, paid_date, method, note):
+def record_payment(user, document, amount, reference, paid_date, method, note, plan=None):
     if not isinstance(document, (Order, Purchase)):
         raise ValidationError('收付款来源单据无效。')
     require_access(user, document, 'view')
@@ -25,6 +25,14 @@ def record_payment(user, document, amount, reference, paid_date, method, note):
     if not incoming and document.status not in ('ordered', 'partial','received'):
         raise ValidationError('采购下单后才能付款。')
     key = 'order' if incoming else 'purchase'
+    if plan:
+        from erp.models import PaymentPlan
+        from .receivables import plan_rows
+        plan=PaymentPlan.objects.get(pk=plan.pk)
+        if not incoming or plan.order_id!=document.pk or plan.organization_id!=document.organization_id:
+            raise ValidationError('指定期次必须属于当前应收订单。')
+        balance=next(row['balance'] for row in plan_rows(document) if row['plan'].pk==plan.pk)
+        if value>balance:raise ValidationError(f'本次收款超过指定期次未收余额 {balance:.2f}。')
     paid = Payment.objects.filter(**{key: document}).aggregate(total=Sum('amount'))['total'] or 0
     if paid + value > document.total:
         raise ValidationError(f'本次金额超过未结余额 {document.total - paid:.2f}。')
@@ -32,7 +40,7 @@ def record_payment(user, document, amount, reference, paid_date, method, note):
     save_version(document, document.version)
     payment = Payment(organization=document.organization, owner=user, direction='in' if incoming else 'out',
                       amount=value, reference=reference, paid_date=paid_date, method=method,
-                      note=note, **{key: document})
+                      note=note,plan=plan, **{key: document})
     payment.full_clean(exclude=['code'])
     payment.save()
     audit(user, payment, 'record_payment')

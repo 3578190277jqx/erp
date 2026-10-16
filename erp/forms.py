@@ -131,6 +131,7 @@ class PaymentForm(forms.Form):
     direction = forms.ChoiceField(label='收支方向', choices=[('in', '收款'), ('out', '付款')])
     order = forms.ModelChoiceField(label='应收订单（收款时选择）', queryset=m.Order.objects.none(), required=False)
     purchase = forms.ModelChoiceField(label='应付采购（付款时选择）', queryset=m.Purchase.objects.none(), required=False)
+    plan = forms.ModelChoiceField(label='指定收款期次（不选则按顺序分摊）',queryset=m.PaymentPlan.objects.none(),required=False)
     amount = forms.DecimalField(label='本次金额', max_digits=14, decimal_places=2, min_value=0.01)
     reference = forms.CharField(label='唯一凭证号', max_length=80)
     paid_date = forms.DateField(label='收付日期')
@@ -142,6 +143,14 @@ class PaymentForm(forms.Form):
         allowed = accessible_organizations(user, 'finance', 'create')
         self.fields['order'].queryset = scoped(user, m.Order, org).filter(organization__in=allowed).exclude(status__in=['draft', 'cancelled'])
         self.fields['purchase'].queryset = scoped(user, m.Purchase, org).filter(organization__in=allowed, status__in=['ordered','partial', 'received'])
+        data=kwargs.get('data') or {}
+        selected=data.get('order') or self.initial.get('order')
+        try:selected=int(selected)
+        except (TypeError,ValueError):selected=None
+        self.fields['plan'].queryset=scoped(user,m.PaymentPlan,org).filter(order__in=self.fields['order'].queryset,order_id=selected).select_related('order')
+        self.fields['plan'].label_from_instance=lambda plan:f'{plan.order.code} · {plan.sequence} {plan.name} · 应收{plan.amount:.2f}'
+        from django.urls import reverse
+        self.fields['order'].widget.attrs['data-plan-url']=reverse('payment_plan_choices')
         style_fields(self)
 
     def clean(self):
@@ -149,6 +158,8 @@ class PaymentForm(forms.Form):
         incoming = data.get('direction') == 'in'
         if (incoming and (not data.get('order') or data.get('purchase'))) or (not incoming and (not data.get('purchase') or data.get('order'))):
             raise ValidationError('收款只选择订单；付款只选择采购，不能同时选择。')
+        if data.get('plan') and (not incoming or data['plan'].order_id!=data['order'].pk):
+            raise ValidationError('指定期次必须属于当前应收订单。')
         return data
 
 

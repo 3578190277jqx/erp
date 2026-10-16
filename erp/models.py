@@ -20,6 +20,7 @@ def qty_field(label, default=1):
 class Organization(models.Model):
     KINDS = [('company', '公司'), ('store', '门店'), ('factory', '工厂'), ('warehouse', '仓储组织')]
     name = models.CharField('组织名称', max_length=100)
+    require_payment_plan = models.BooleanField('销售履约必须启用分期计划',default=False)
     kind = models.CharField('组织类型', max_length=20, choices=KINDS, default='store')
     parent = models.ForeignKey('self', verbose_name='上级组织', null=True, blank=True,
                                on_delete=models.PROTECT, related_name='children')
@@ -408,6 +409,7 @@ class Payment(Record):
     module = 'finance'
     direction = models.CharField('收支方向', max_length=10, choices=[('in', '收款'), ('out', '付款')])
     order = models.ForeignKey(Order, verbose_name='应收订单', on_delete=models.PROTECT, null=True, blank=True)
+    plan = models.ForeignKey('PaymentPlan',verbose_name='指定核销期次',null=True,blank=True,on_delete=models.PROTECT)
     purchase = models.ForeignKey(Purchase, verbose_name='应付采购', on_delete=models.PROTECT, null=True, blank=True)
     amount = money_field('金额')
     paid_date = models.DateField('收付日期')
@@ -421,6 +423,8 @@ class Payment(Record):
 
     def clean(self):
         super().clean()
+        if self.plan_id and (self.direction!='in' or self.plan.order_id!=self.order_id):
+            raise ValidationError('指定期次必须属于当前应收订单。')
         if self.direction == 'in' and (not self.order_id or self.purchase_id):
             raise ValidationError('收款必须且只能关联应收订单。')
         if self.direction == 'out' and (not self.purchase_id or self.order_id):
@@ -491,6 +495,8 @@ class Attachment(Record):
     kind = models.CharField('附件类型',max_length=20,default='drawing',choices=[('drawing','图纸/方案'),('photo','现场照片'),('contract','合同/凭证')])
     size = models.PositiveIntegerField('文件字节数')
     sha256 = models.CharField('SHA256',max_length=64)
+    deleted_at = models.DateTimeField('删除时间',null=True,blank=True,editable=False)
+    purged_at = models.DateTimeField('文件清理时间',null=True,blank=True,editable=False)
 
 
 class Handoff(Record):

@@ -18,6 +18,9 @@ class Command(BaseCommand):
         if not settings.DEBUG:raise CommandError('仅可用于本地演示环境。')
         seed=m.AuditEvent.objects.filter(action='demo_seed').first()
         if not seed:raise CommandError('请先运行 seed_demo。')
+        store=m.Organization.objects.filter(kind='store',name__contains='杭州').first()
+        factory=m.Organization.objects.filter(kind='factory').first()
+        m.CollaborationRoute.objects.get_or_create(source=store,target=factory)
         if m.AuditEvent.objects.filter(action='demo_upgrade_v11').exists():
             self.stdout.write('v1.1 演示已存在，保留全部数据。');return
         admin=User.objects.get(username='demo_admin')

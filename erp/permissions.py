@@ -6,7 +6,7 @@ from .models import Membership, Organization
 ALL_MODULES = {
     'customers', 'measurements', 'designs', 'quotes', 'orders', 'breakdowns', 'materials',
     'production', 'purchases', 'inventory', 'movements', 'deliveries', 'installations',
-    'aftersales', 'finance', 'changes', 'audit', 'handoffs',
+    'aftersales', 'finance', 'changes', 'audit', 'handoffs','receipts','suppliers','followups','attachments',
 }
 ROLE_READ = {
     'boss': ALL_MODULES, 'manager': ALL_MODULES,

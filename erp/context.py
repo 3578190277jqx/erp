@@ -14,7 +14,7 @@ def workspace(request):
         selected = None
     groups = OrderedDict()
     for module in MODULES.values():
-        if module.key in ('warehouses', 'movements'):
+        if module.key in ('warehouses', 'movements','followups','receipts'):
             continue
         if can(request.user, module.model.module, 'view', selected):
             groups.setdefault(module.group, []).append(module)

@@ -40,11 +40,17 @@ def import_records(user,key,organization,file):
     if reader.fieldnames != IMPORT_COLUMNS[key]:
         raise ValidationError('表头与模板不一致，请先下载模板。')
     model=m.Customer if key=='customers' else m.Material
+    # Serialize imports for one organization; ordinary manual records may still
+    # share a phone or material name, so no false global uniqueness is imposed.
+    m.Organization.objects.select_for_update().get(pk=organization.pk)
     count=0
     for count,row in enumerate(reader,1):
         if count>1000 or None in row or any(v is None for v in row.values()):
             raise ValidationError(f'第{count}行列数错误或超过1000行。')
         row={k:v.strip() for k,v in row.items()}
+        identity={key:row[key] for key in (['phone'] if model==m.Customer else ['name','specification','unit'])}
+        if model.objects.filter(organization=organization,**identity).exists():
+            raise ValidationError(f'第{count}行疑似重复：客户电话或物料名称/规格/单位已存在；整批未写入。')
         try:
             obj=model(organization=organization,owner=user,**row)
             obj.full_clean(exclude=['code']); obj.save()

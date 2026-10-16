@@ -61,7 +61,7 @@ def tone(status):
 @register.filter
 def action_name(action):
     from erp.services.workflows import ACTION_LABELS
-    labels = {'upload_attachment':'上传私有附件','send_handoff':'发送工厂交接','accept_handoff':'工厂接单','reject_handoff':'工厂拒单','factory_progress':'工厂回传进度','factory_completed':'工厂完工回传','factory_order_created':'创建工厂生产订单','reserve_stock':'预留物料','release_reservation':'释放预留','partial_receipt':'登记分批收货','create_payment_plan':'启用分期回款','new_design_revision':'新建设计版本','import_csv':'批量导入','change_products':'修订产品快照','add_change_line':'添加变更增减项','followup':'更新跟进提醒','demo_upgrade_v11':'追加升级示例','create': '新建记录', 'edit': '编辑信息', 'add_line': '添加明细', 'delete_line': '移除明细',
+    labels = {'resend_handoff':'拒单后重发交接','reschedule_payment_plan':'同步分期到期日','delete_attachment':'删除附件','upgrade_change_review':'升级后重新核对变更','upgrade_internal_partner':'归并内部协作客户','upload_attachment':'上传私有附件','send_handoff':'发送工厂交接','accept_handoff':'工厂接单','reject_handoff':'工厂拒单','factory_progress':'工厂回传进度','factory_completed':'工厂完工回传','factory_order_created':'创建工厂生产订单','reserve_stock':'预留物料','release_reservation':'释放预留','partial_receipt':'登记分批收货','create_payment_plan':'启用分期回款','new_design_revision':'新建设计版本','import_csv':'批量导入','change_products':'修订产品快照','add_change_line':'添加变更增减项','followup':'更新跟进提醒','demo_upgrade_v11':'追加升级示例','create': '新建记录', 'edit': '编辑信息', 'add_line': '添加明细', 'delete_line': '移除明细',
               'stock_adjustment': '库存调整', 'record_payment': '登记收付款', 'export': '导出数据',
               'approved_change': '批准订单变更', 'quote_accepted': '报价成交',
               'production_started': '生产开工', 'production_completed': '生产完工',

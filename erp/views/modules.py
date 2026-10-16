@@ -5,6 +5,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction, IntegrityError, OperationalError
+from django.db.models.deletion import ProtectedError
 from django.db.models import Q, Sum, F, OuterRef, Subquery, DecimalField, Value
 from django.db.models.functions import Coalesce
 from django.http import Http404, HttpResponse
@@ -38,6 +39,7 @@ def authorize(request, module, action='view'):
 
 
 def error_message(exc):
+    if isinstance(exc,ProtectedError):return '该记录已被业务单据或生产 BOM 引用，不能直接删除，请先处理关联业务。'
     if isinstance(exc, ValidationError):
         return '；'.join(exc.messages)
     if isinstance(exc, OperationalError):
@@ -388,7 +390,7 @@ def payment_create(request):
         try:
             data = form.cleaned_data
             record_payment(request.user, data['order'] if data['direction'] == 'in' else data['purchase'],
-                           data['amount'], data['reference'], data['paid_date'], data['method'], data['note'])
+                           data['amount'], data['reference'], data['paid_date'], data['method'], data['note'],plan=data.get('plan'))
             messages.success(request, '收付款已登记，余额已同步。')
             return redirect('list', key='finance')
         except BUSINESS_ERRORS as exc:

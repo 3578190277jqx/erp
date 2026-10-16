@@ -8,7 +8,7 @@ admin.site.index_title = '组织、账号与权限'
 
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
-    list_display = ['name', 'kind', 'parent']
+    list_display = ['name', 'kind', 'parent','require_payment_plan']
     list_filter = ['kind']
     search_fields = ['name']
 

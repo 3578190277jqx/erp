@@ -7,10 +7,10 @@ from django import forms
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError, PermissionDenied
-from django.http import FileResponse,HttpResponse,Http404
+from django.http import FileResponse,HttpResponse,Http404,JsonResponse
 from django.shortcuts import render,redirect,get_object_or_404
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST,require_GET
 from erp import models as m
 from erp.permissions import scoped,can,accessible_organizations
 from erp.forms import style_fields,ChangeLineForm
@@ -34,7 +34,7 @@ def feature_context(request,obj):
         context['show_costs']=can(request.user,'finance','view',obj.organization_id)
     if isinstance(obj,m.Order):
         context['plans']=receivables.plan_rows(obj)
-        context['can_plan']=obj.kind=='sale' and obj.status=='confirmed' and not obj.payment_plans.exists() and (
+        context['can_plan']=obj.kind=='sale' and obj.status=='confirmed' and not context['plans'] and (
             can(request.user,'finance','create',obj.organization_id) or can(request.user,'changes','approve',obj.organization_id))
         context['handoff']=m.Handoff.objects.filter(order=obj).first()
         context['can_handoff']=obj.kind=='sale' and obj.status=='confirmed' and scoped(request.user,m.Order,action='edit').filter(pk=obj.pk).exists() and (not context['handoff'] or context['handoff'].status=='rejected')
@@ -59,7 +59,7 @@ def feature_context(request,obj):
         context['change_form']=form
         context['can_change_lines']=obj.status=='pending' and scoped(request.user,m.ChangeRequest,action='edit').filter(pk=obj.pk).exists()
     if obj.module in evidence.PARENTS:
-        context['attachments']=m.Attachment.objects.filter(organization=obj.organization,object_type=obj.module,object_id=obj.pk).select_related('owner')
+        context['attachments']=m.Attachment.objects.filter(organization=obj.organization,object_type=obj.module,object_id=obj.pk,deleted_at__isnull=True).select_related('owner')
         context['can_attach']=scoped(request.user,type(obj),action='edit').filter(pk=obj.pk).exists()
     context['today_iso']=str(timezone.localdate())
     return context
@@ -85,6 +85,28 @@ def download(request,pk):
     response['X-Content-Type-Options']='nosniff'
     response['Cache-Control']='private, no-store'
     return response
+
+
+@login_required
+@require_POST
+def delete_attachment(request,pk):
+    item=evidence.authorized_attachment(request.user,pk)
+    try:
+        evidence.delete_attachment(request.user,item,request.POST.get('version'))
+        messages.success(request,'附件已删除，保留审计记录。')
+    except BUSINESS_ERRORS as exc:messages.error(request,error_message(exc))
+    return redirect('detail',key=item.object_type,pk=item.object_id)
+
+
+@login_required
+@require_GET
+def payment_plan_choices(request):
+    try:pk=int(request.GET.get('order',''))
+    except (ValueError,TypeError):raise Http404
+    order=record_for(request,module_for('orders'),pk)
+    if not can(request.user,'finance','create',order.organization_id):raise PermissionDenied
+    rows=[{'id':row['plan'].pk,'label':f'{row["plan"].sequence} · {row["plan"].name} · 未收 {row["balance"]:.2f}'} for row in receivables.plan_rows(order)]
+    response=JsonResponse({'plans':rows});response['Cache-Control']='private, no-store';return response
 
 
 @login_required
