@@ -43,6 +43,7 @@ def role_allows(role, module, action):
     if module == 'followups':
         return role_allows(role,'customers',action)
     if module == 'handoffs':
+        if action=='withdraw':return role in ('boss','manager','sales','dealer')
         return role in ('boss','manager','sales','dealer','planner','engineer') if action in ('view','export') else role in ('boss','manager','planner')
     if action in ('view', 'export'):
         return module in ROLE_READ.get(role, set())
@@ -131,7 +132,7 @@ def scoped(user, model, organization=None, action='view'):
         qs = qs.filter(predicate)
     if model.module == 'handoffs' and action in ('view','export'):
         incoming = accessible_organizations(user,'handoffs','view')
-        qs = model.objects.filter(Q(pk__in=qs.values('pk')) | Q(target_organization__in=incoming))
+        qs = model.objects.filter(Q(pk__in=qs.values('pk')) | (Q(target_organization__in=incoming)&~Q(status='withdrawn')))
     if org_id:
         qs = qs.filter(Q(organization_id=org_id)|Q(target_organization_id=org_id)) if model.module=='handoffs' else qs.filter(organization_id=org_id)
     return qs.distinct()

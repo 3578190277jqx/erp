@@ -184,6 +184,11 @@ def detail(request, key, pk):
                            and scoped(request.user, module.model, action='edit').filter(pk=obj.pk).exists(),
                'actions': [(a, text) for a, text in available_actions(obj) if scoped(request.user, module.model, action=a).filter(pk=obj.pk).exists()] if hasattr(obj, 'status') else [],
                'events': m.AuditEvent.objects.filter(organization=obj.organization, code=obj.code)[:12]}
+    if isinstance(obj,m.Handoff):
+        from erp.services.collaboration import handoff_actions
+        context['actions']=handoff_actions(request.user,obj)
+    if isinstance(obj,m.ChangeRequest) and obj.requested_by_id!=request.user.pk:
+        context['actions']=[(a,t) for a,t in context['actions'] if a!='withdraw']
     if isinstance(obj, (m.Quote, m.Purchase, m.Breakdown)):
         cols = {'quotes': ('name', 'room', 'specification', 'pricing_mode', 'billable_quantity', 'unit', 'unit_price', 'subtotal'),
                 'purchases': ('material', 'quantity', 'received_qty', 'unit_price', 'subtotal'),

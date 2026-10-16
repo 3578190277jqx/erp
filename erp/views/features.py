@@ -37,8 +37,9 @@ def feature_context(request,obj):
         context['can_plan']=obj.kind=='sale' and obj.status=='confirmed' and not context['plans'] and (
             can(request.user,'finance','create',obj.organization_id) or can(request.user,'changes','approve',obj.organization_id))
         context['handoff']=m.Handoff.objects.filter(order=obj).first()
-        context['can_handoff']=obj.kind=='sale' and obj.status=='confirmed' and scoped(request.user,m.Order,action='edit').filter(pk=obj.pk).exists() and (not context['handoff'] or context['handoff'].status=='rejected')
+        context['can_handoff']=obj.kind=='sale' and obj.status=='confirmed' and scoped(request.user,m.Order,action='edit').filter(pk=obj.pk).exists() and (not context['handoff'] or context['handoff'].status in ('rejected','withdrawn'))
         context['factories']=collaboration.allowed_factories(request.user,obj.organization)
+        context['can_withdraw_handoff']=bool(context['handoff'] and context['handoff'].status=='sent' and scoped(request.user,m.Order,action='edit').filter(pk=obj.pk).exists())
     if isinstance(obj,m.Production):
         context['can_reserve']=obj.status=='planned' and scoped(request.user,m.Production,action='reserve').filter(pk=obj.pk).exists()
         context['reservations']=obj.reservations.select_related('stock__material').all()
@@ -47,7 +48,7 @@ def feature_context(request,obj):
         context['receipt_lines']=obj.lines.select_related('material').all()
     if isinstance(obj,m.Handoff):
         context['handoff_payload']=obj.payload
-        context['can_accept']=obj.status=='sent' and can(request.user,'handoffs','accept',obj.target_organization_id)
+        context['route_inactive']=not m.CollaborationRoute.objects.filter(source_id=obj.organization_id,target_id=obj.target_organization_id,enabled=True).exists()
     if isinstance(obj,m.Design):
         context['can_revision']=scoped(request.user,m.Design,action='edit').filter(pk=obj.pk).exists()
         context['design_versions']=scoped(request.user,m.Design).filter(family_id=obj.family_id).order_by('-revision')[:20]

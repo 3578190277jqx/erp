@@ -440,7 +440,7 @@ class ChangeRequest(Record):
     requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name='申请人',
                                      on_delete=models.PROTECT, related_name='+', editable=False)
     status = models.CharField('审批状态', max_length=20, default='pending', choices=[
-        ('pending', '待审批'), ('approved', '已批准'), ('rejected', '已驳回')])
+        ('pending', '待审批'), ('approved', '已批准'), ('rejected', '已驳回'),('withdrawn','已撤回')])
 
     def save(self, *args, **kwargs):
         if not self.pk and not self.requested_by_id:
@@ -506,7 +506,7 @@ class Handoff(Record):
     order = models.OneToOneField(Order,verbose_name='门店订单',on_delete=models.PROTECT,related_name='handoff')
     target_organization = models.ForeignKey(Organization,verbose_name='接单工厂',on_delete=models.PROTECT,related_name='incoming_handoffs')
     payload = models.JSONField('冻结的生产快照',default=dict,editable=False)
-    status = models.CharField('交接状态',max_length=20,default='sent',choices=[('sent','待工厂接单'),('accepted','已接单'),('rejected','已拒单'),('completed','已完工回传')])
+    status = models.CharField('交接状态',max_length=20,default='sent',choices=[('sent','待工厂接单'),('accepted','已接单'),('rejected','已拒单'),('completed','已完工回传'),('withdrawn','已撤回')])
 
     def clean(self):
         super().clean()

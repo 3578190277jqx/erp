@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError, PermissionDenied
 from django.db import transaction
 from erp import models as m
-from erp.permissions import can
+from erp.permissions import can,scoped,require_access
 from .common import lock, save_version, audit, snapshot, system_update
 
 PRODUCTION_FIELDS = ('name','room','specification','quantity','unit','pricing_mode','category','width_mm','height_mm')
@@ -28,8 +28,8 @@ def send_handoff(user,order,target,version,note='',handoff_version=None):
     if existing:
         try:expected=int(handoff_version)
         except (TypeError,ValueError):raise ValidationError('重发需有效的交接版本，请刷新。')
-        if existing.status!='rejected' or existing.version!=expected:
-            raise ValidationError('只有当前已拒单的交接可重发，请刷新。')
+        if existing.status not in ('rejected','withdrawn') or existing.version!=expected:
+            raise ValidationError('只有已拒单或已撤回的交接可重发，请刷新。')
     payload = {'title':order.title,'source_code':order.code,'source_version':order.version,
                'due_date':str(order.due_date or ''),
                'lines':[{field:str(getattr(line,field)) for field in PRODUCTION_FIELDS} for line in order.lines.filter(category='product')]}
@@ -56,16 +56,17 @@ def accept_handoff(user,handoff,version,reject=False,note=''):
     handoff = m.Handoff.objects.select_for_update().get(pk=handoff.pk)
     if not can(user,'handoffs','accept',handoff.target_organization_id):
         raise PermissionDenied('只有接单工厂的授权人员可处理交接。')
-    if not user.is_superuser and not m.CollaborationRoute.objects.filter(source_id=source.organization_id,target_id=handoff.target_organization_id,enabled=True).exists():
+    if not reject and not user.is_superuser and not m.CollaborationRoute.objects.filter(source_id=source.organization_id,target_id=handoff.target_organization_id,enabled=True).exists():
         raise PermissionDenied('源门店与本工厂的协作授权未启用，请联系管理员。')
     if handoff.status != 'sent' or handoff.version != int(version):
         raise ValidationError('交接状态或版本已变化，请刷新。')
     if reject:
         if not note.strip():
             raise ValidationError('拒单需要原因。')
+        before=snapshot(handoff)
         handoff.status, handoff.note = 'rejected', note
         save_version(handoff,handoff.version)
-        audit(user,handoff,'reject_handoff')
+        audit(user,handoff,'reject_handoff',before)
         return handoff
     if source.status != 'confirmed':
         raise ValidationError('源订单已变化，不能接单。')
@@ -83,6 +84,43 @@ def accept_handoff(user,handoff,version,reject=False,note=''):
     audit(user,handoff,'accept_handoff',before)
     audit(user,order,'factory_order_created')
     return order
+
+
+def handoff_actions(user,handoff):
+    from .workflows import available_actions
+    result=[]
+    for action,label in available_actions(handoff):
+        if action=='withdraw':
+            allowed=scoped(user,m.Order,action='edit').filter(pk=handoff.order_id).exists()
+        else:
+            allowed=can(user,'handoffs','accept',handoff.target_organization_id)
+            if action=='accept' and not user.is_superuser:
+                allowed=allowed and m.CollaborationRoute.objects.filter(source_id=handoff.organization_id,target_id=handoff.target_organization_id,enabled=True).exists()
+        if allowed:result.append((action,label))
+    return result
+
+
+@transaction.atomic
+def withdraw_handoff(user,handoff,version,note):
+    source=m.Order.objects.select_for_update().get(pk=handoff.order_id)
+    require_access(user,source,'edit')
+    handoff=m.Handoff.objects.select_for_update().get(pk=handoff.pk)
+    try:expected=int(version)
+    except (ValueError,TypeError):raise ValidationError('缺少有效交接版本。')
+    if handoff.status!='sent' or handoff.version!=expected:
+        raise ValidationError('仅当前待接单交接可撤回；已接单不能单边撤回。')
+    if not note.strip():raise ValidationError('请填写撤回原因。')
+    before=snapshot(handoff);handoff.status='withdrawn';handoff.note=note.strip()
+    save_version(handoff,expected);save_version(source,source.version)
+    audit(user,handoff,'withdraw_handoff',before)
+    audit(user,source,'handoff_withdrawn',after={'handoff':handoff.code,'reason':note.strip()})
+    return handoff
+
+
+def transition_handoff(user,handoff,action,version,note=''):
+    if action=='withdraw':return withdraw_handoff(user,handoff,version,note)
+    if action in ('accept','reject'):return accept_handoff(user,handoff,version,reject=action=='reject',note=note)
+    raise ValidationError('不支持的交接操作。')
 
 
 @transaction.atomic

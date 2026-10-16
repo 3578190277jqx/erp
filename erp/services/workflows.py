@@ -25,14 +25,15 @@ TRANSITIONS = {
     m.Installation: {'assign': (('pending', 'failed'), 'assigned'), 'start': ('assigned', 'in_progress'),
                      'complete': ('in_progress', 'completed'), 'fail': ('in_progress', 'failed')},
     m.AfterSales: {'start': ('new', 'in_progress'), 'resolve': ('in_progress', 'resolved'), 'close': ('resolved', 'closed')},
-    m.ChangeRequest: {'approve': ('pending', 'approved'), 'reject': ('pending', 'rejected')},
+    m.ChangeRequest: {'approve': ('pending', 'approved'), 'reject': ('pending', 'rejected'),'withdraw':('pending','withdrawn')},
+    m.Handoff:{'accept':('sent','accepted'),'reject':('sent','rejected'),'withdraw':('sent','withdrawn')},
 }
 ACTION_LABELS = {'contact': '开始跟进', 'measure': '进入量尺', 'design': '进入设计', 'quote': '进入报价',
                  'win': '标记成交', 'close': '关闭', 'assign': '确认派工', 'start': '开始执行',
                  'complete': '完成验收', 'fail': '登记失败', 'submit': '提交审核', 'approve': '批准',
                  'reject': '驳回', 'accept': '接受并生成订单', 'confirm': '确认合同', 'cancel': '取消订单',
                  'release': '审核并释放工单', 'plan': '确认排程', 'issue': '领料', 'order': '采购下单',
-                 'receive': '确认收货', 'ship': '发运', 'deliver': '签收', 'resolve': '确认解决'}
+                 'receive': '确认收货', 'ship': '发运', 'deliver': '签收', 'resolve': '确认解决','withdraw':'撤回申请'}
 
 
 def available_actions(obj):
@@ -42,6 +43,7 @@ def available_actions(obj):
         m.Delivery: {'assign': '确认派车'},
         m.Installation: {'start': '开始安装', 'complete': '完成安装验收'},
         m.AfterSales: {'start': '开始处理'},
+        m.Handoff:{'accept':'工厂接单','reject':'拒绝接单','withdraw':'撤回交接'},
     }.get(type(obj), {})
     return [(action, labels.get(action, ACTION_LABELS[action])) for action, (sources, target) in TRANSITIONS.get(type(obj), {}).items()
             if obj.status in (sources if isinstance(sources, tuple) else (sources,))]
@@ -54,7 +56,7 @@ def prerequisites(user, obj, action, note):
         check_gate(order.source_handoff.order if order.source_handoff_id else order,'start')
     if isinstance(obj,m.Delivery) and action=='ship':check_gate(obj.order,'ship')
     if isinstance(obj,m.Installation) and action=='complete':check_gate(obj.order,'complete')
-    if action in ('fail', 'reject', 'cancel', 'close', 'resolve') and not note.strip():
+    if action in ('fail', 'reject', 'cancel', 'close', 'resolve','withdraw') and not note.strip():
         raise ValidationError('此操作必须填写原因或处理结论。')
     if action == 'complete' and isinstance(obj, (m.Measurement, m.Installation)) and not note.strip():
         raise ValidationError('请填写量尺结论或验收说明。')
@@ -90,6 +92,8 @@ def prerequisites(user, obj, action, note):
             raise ValidationError('请填写车牌或物流单号。')
     if isinstance(obj, m.Installation) and action == 'start' and obj.order.status != 'installing':
         raise ValidationError('订单必须已配送签收后才能开始安装。')
+    if isinstance(obj,m.ChangeRequest) and action=='withdraw' and obj.requested_by_id!=user.pk:
+        raise ValidationError('只有真实申请人可撤回待审批变更。')
     if isinstance(obj, m.ChangeRequest) and action == 'approve':
         last_editor = m.AuditEvent.objects.filter(object_type='changes', object_id=obj.pk, action='edit').first()
         if obj.requested_by_id == user.pk or (last_editor and last_editor.owner_id == user.pk):
@@ -158,6 +162,9 @@ def effects(user, obj, action):
 
 @transaction.atomic
 def transition(user, obj, action, version, note=''):
+    if isinstance(obj,m.Handoff):
+        from .collaboration import transition_handoff
+        return transition_handoff(user,obj,action,version,note)
     require_access(user, obj, action)
     # Order cancellation and all fulfillment operations serialize on the same
     # parent row before child locks. PostgreSQL row locks protect cancel/release;

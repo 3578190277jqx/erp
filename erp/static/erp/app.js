@@ -23,7 +23,7 @@
     document.querySelector('#workflow-action').value = data.action;
     document.querySelector('#workflow-version').value = data.version;
     document.querySelector('#workflow-title').textContent = `确认${data.label}？`;
-    const required = ['fail', 'reject', 'cancel', 'close', 'resolve', 'complete'].includes(data.action);
+    const required = ['fail', 'reject', 'cancel', 'close', 'resolve', 'complete', 'withdraw'].includes(data.action);
     document.querySelector('#workflow-note').required = required;
     document.querySelector('#workflow-note').value = '';
     document.querySelector('#workflow-required').textContent = required ? ' *' : '（选填）';
