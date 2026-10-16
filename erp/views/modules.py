@@ -222,7 +222,8 @@ def edit_record(request, key, pk=None):
                     if isinstance(candidate, m.Material) and candidate.unit != fresh.unit and m.StockMovement.objects.filter(material=candidate).exists():
                         raise ValidationError('已有库存流水的物料不能改变计量单位。')
                     if isinstance(candidate, m.Quote):
-                        candidate.total = (sum((line.subtotal for line in candidate.lines.all()), Decimal('0')) * candidate.discount).quantize(Decimal('.01'))
+                        from erp.services.pricing import quote_amounts
+                        candidate.total = quote_amounts(candidate)['total']
                     save_version(candidate, fresh.version)
                     audit(request.user, candidate, 'edit', before)
                 else:

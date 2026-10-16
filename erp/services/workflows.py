@@ -20,7 +20,7 @@ TRANSITIONS = {
     m.Production: {'plan': ('pending', 'planned'), 'issue': ('planned', 'issued'),
                    'start': ('issued', 'in_progress'), 'complete': ('in_progress', 'completed')},
     m.Purchase: {'submit': ('draft', 'review'), 'approve': ('review', 'approved'),
-                 'reject': ('review', 'draft'), 'order': ('approved', 'ordered'), 'receive': ('ordered', 'received')},
+                 'reject': ('review', 'draft'), 'order': ('approved', 'ordered'), 'receive': (('ordered','partial'), 'received')},
     m.Delivery: {'assign': ('pending', 'assigned'), 'ship': ('assigned', 'shipped'), 'deliver': ('shipped', 'delivered')},
     m.Installation: {'assign': (('pending', 'failed'), 'assigned'), 'start': ('assigned', 'in_progress'),
                      'complete': ('in_progress', 'completed'), 'fail': ('in_progress', 'failed')},
@@ -48,6 +48,10 @@ def available_actions(obj):
 
 
 def prerequisites(user, obj, action, note):
+    from .receivables import check_gate
+    if isinstance(obj,m.Production) and action=='start':check_gate(obj.breakdown.order,'start')
+    if isinstance(obj,m.Delivery) and action=='ship':check_gate(obj.order,'ship')
+    if isinstance(obj,m.Installation) and action=='complete':check_gate(obj.order,'complete')
     if action in ('fail', 'reject', 'cancel', 'close', 'resolve') and not note.strip():
         raise ValidationError('此操作必须填写原因或处理结论。')
     if action == 'complete' and isinstance(obj, (m.Measurement, m.Installation)) and not note.strip():
@@ -63,8 +67,12 @@ def prerequisites(user, obj, action, note):
             raise ValidationError('已释放生产的订单不能直接取消，请走售后及退料流程。')
         if action == 'cancel' and obj.payment_set.exists():
             raise ValidationError('已有收款的订单不能直接取消，请先由财务处理退款。')
+        if action == 'cancel' and m.Handoff.objects.filter(order=obj,status__in=['sent','accepted']).exists():
+            raise ValidationError('订单已有进行中的工厂交接，不能直接取消。')
     if isinstance(obj, m.Breakdown) and action in ('submit', 'release') and obj.order.status != 'confirmed':
         raise ValidationError('订单必须已确认且尚未开工。')
+    if isinstance(obj,m.Breakdown) and m.Handoff.objects.filter(order=obj.order,status__in=['sent','accepted']).exists():
+        raise ValidationError('源订单已交接，请在接单工厂的本地生产订单上拆单。')
     if isinstance(obj, m.Production) and action == 'plan' and (not obj.start_date or not obj.due_date or not obj.warehouse_id):
         raise ValidationError('排程需选择领料仓库、开工和完工日期。')
     if isinstance(obj, m.Production):
@@ -90,12 +98,20 @@ def prerequisites(user, obj, action, note):
         received = sum((p.amount for p in order.payment_set.all()), 0)
         if obj.proposed_total < received:
             raise ValidationError('变更金额不能少于已收款。')
+        if obj.proposed_total != order.total and order.payment_plans.exists():
+            raise ValidationError('已有分期计划的订单不可只改合同额，请先由财务处理计划修订。')
+        if m.Handoff.objects.filter(order=order,status__in=['sent','accepted']).exists():
+            raise ValidationError('订单已交接工厂，请先解决交接后再修改。')
+        if order.lines.exists() and not obj.lines.exists() and obj.proposed_total != order.total:
+            raise ValidationError('有产品明细的订单必须通过增减项计算变更金额。')
 
 
 def effects(user, obj, action):
     if isinstance(obj, m.Quote) and action == 'accept':
-        m.Order.objects.create(organization=obj.organization, owner=obj.owner, customer=obj.customer,
-                               quote=obj, title=obj.title, total=obj.total)
+        order = m.Order.objects.create(organization=obj.organization, owner=obj.owner, customer=obj.customer,
+                               quote=obj, title=obj.title, total=obj.total,tax_rate=obj.tax_rate)
+        from .pricing import copy_quote_lines
+        copy_quote_lines(obj,order)
         system_update(user, obj.customer, 'quote_accepted', status='won')
     elif isinstance(obj, m.Breakdown) and action == 'release':
         m.Production.objects.create(organization=obj.organization, owner=obj.owner, breakdown=obj)
@@ -104,8 +120,12 @@ def effects(user, obj, action):
             issue_production(user, obj)
         elif action == 'start':
             system_update(user, obj.breakdown.order, 'production_started', status='producing')
+            from .collaboration import return_progress
+            return_progress(user,obj.breakdown.order,'producing')
         elif action == 'complete':
             system_update(user, obj.breakdown.order, 'production_completed', status='ready')
+            from .collaboration import return_progress
+            return_progress(user,obj.breakdown.order,'ready')
     elif isinstance(obj, m.Purchase) and action == 'receive':
         receive_purchase(user, obj)
     elif isinstance(obj, m.Delivery):
@@ -116,6 +136,8 @@ def effects(user, obj, action):
     elif isinstance(obj, m.Installation) and action == 'complete':
         system_update(user, obj.order, 'installation_completed', status='completed')
     elif isinstance(obj, m.ChangeRequest) and action == 'approve':
+        from .pricing import apply_change_lines
+        apply_change_lines(obj)
         system_update(user, obj.order, 'approved_change', total=obj.proposed_total, due_date=obj.proposed_due_date)
 
 

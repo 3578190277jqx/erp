@@ -1,5 +1,5 @@
 import uuid
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -93,7 +93,7 @@ class Record(models.Model):
             return
         errors = {}
         for field in self._meta.fields:
-            if not isinstance(field, models.ForeignKey) or field.name in ('organization', 'owner'):
+            if not isinstance(field, models.ForeignKey) or field.name in ('organization', 'owner', *getattr(self,'cross_org_fields',())):
                 continue
             if getattr(self, field.attname, None):
                 obj = getattr(self, field.name)
@@ -131,6 +131,8 @@ class Design(Record):
     customer = models.ForeignKey(Customer, verbose_name='客户', on_delete=models.PROTECT)
     title = models.CharField('方案名称', max_length=150)
     revision = models.PositiveIntegerField('方案版本', default=1)
+    family_id = models.UUIDField('方案系列',default=uuid.uuid4,editable=False)
+    previous_version = models.ForeignKey('self',verbose_name='上一版本',null=True,blank=True,on_delete=models.PROTECT)
     status = models.CharField('状态', max_length=20, default='draft', choices=[
         ('draft', '草稿'), ('review', '待审核'), ('approved', '已批准'), ('rejected', '已驳回')])
 
@@ -143,12 +145,43 @@ class Quote(Record):
     discount = models.DecimalField('折扣系数（0—1）', max_digits=5, decimal_places=4, default=1,
                                    validators=[MinValueValidator(Decimal('0')), MaxValueValidator(Decimal('1'))])
     total = money_field('含折扣总额')
+    tax_rate = models.DecimalField('税率（0—1）', max_digits=5, decimal_places=4, default=0,
+                                  validators=[MinValueValidator(0), MaxValueValidator(1)])
     status = models.CharField('状态', max_length=20, default='draft', choices=[
         ('draft', '草稿'), ('review', '待审核'), ('approved', '已批准'),
         ('rejected', '已驳回'), ('accepted', '已接受')])
 
 
-class QuoteLine(models.Model):
+class PriceBasis(models.Model):
+    pricing_mode = models.CharField('计价方式', max_length=20, default='quantity', choices=[
+        ('quantity', '按数量'), ('projected', '投影面积'), ('expanded', '展开面积（录入㎡）'),
+        ('linear', '延米'), ('package', '套餐')])
+    category = models.CharField('项目类型', max_length=15, default='product', choices=[('product','产品'),('service','费用项')])
+    width_mm = models.DecimalField('宽度 / 长度 mm', max_digits=10, decimal_places=2, default=0, validators=[MinValueValidator(0)])
+    height_mm = models.DecimalField('高度 mm', max_digits=10, decimal_places=2, default=0, validators=[MinValueValidator(0)])
+    unit_cost = money_field('计价单位参考成本')
+    discountable = models.BooleanField('参与报价折扣', default=True)
+
+    class Meta:
+        abstract = True
+
+    @property
+    def billable_quantity(self):
+        if self.pricing_mode == 'projected':
+            return self.quantity * self.width_mm * self.height_mm / Decimal('1000000')
+        if self.pricing_mode == 'linear':
+            return self.quantity * self.width_mm / Decimal('1000')
+        return self.quantity
+
+    def clean(self):
+        super().clean()
+        if self.pricing_mode in ('projected','linear') and self.width_mm <= 0:
+            raise ValidationError({'width_mm':'尺寸计价必须填写有效宽度 / 长度。'})
+        if self.pricing_mode == 'projected' and self.height_mm <= 0:
+            raise ValidationError({'height_mm':'投影面积计价必须填写有效高度。'})
+
+
+class QuoteLine(PriceBasis):
     quote = models.ForeignKey(Quote, on_delete=models.CASCADE, related_name='lines')
     name = models.CharField('产品名称', max_length=120)
     room = models.CharField('空间', max_length=60, blank=True)
@@ -159,7 +192,7 @@ class QuoteLine(models.Model):
 
     @property
     def subtotal(self):
-        return (self.quantity * self.unit_price).quantize(Decimal('0.01'))
+        return (self.billable_quantity * self.unit_price).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
     class Meta:
         ordering = ['id']
@@ -168,16 +201,45 @@ class QuoteLine(models.Model):
 
 class Order(Record):
     module = 'orders'
+    cross_org_fields = ('source_handoff',)
     customer = models.ForeignKey(Customer, verbose_name='客户', on_delete=models.PROTECT)
     quote = models.OneToOneField(Quote, verbose_name='来源报价', on_delete=models.PROTECT, null=True, blank=True)
     title = models.CharField('项目名称', max_length=150)
     contract_number = models.CharField('合同编号', max_length=80, blank=True)
     due_date = models.DateField('承诺交期', null=True, blank=True)
     total = money_field('合同金额')
+    tax_rate = models.DecimalField('税率', max_digits=5, decimal_places=4, default=0, validators=[MinValueValidator(0),MaxValueValidator(1)])
+    kind = models.CharField('订单类型', max_length=20, default='sale', choices=[('sale','销售订单'),('manufacturing','工厂生产订单')])
+    source_handoff = models.OneToOneField('Handoff', verbose_name='来源交接', null=True, blank=True,
+                                         on_delete=models.PROTECT, related_name='factory_order')
     status = models.CharField('履约状态', max_length=20, default='draft', choices=[
         ('draft', '合同待确认'), ('confirmed', '已确认'), ('producing', '生产中'),
         ('ready', '待配送'), ('shipping', '配送中'), ('installing', '待安装'),
         ('completed', '已完成'), ('cancelled', '已取消')])
+
+    def clean(self):
+        super().clean()
+        if self.source_handoff_id and (self.kind != 'manufacturing' or self.source_handoff.target_organization_id != self.organization_id):
+            raise ValidationError('生产订单只能属于交接指定的工厂。')
+
+
+class OrderLine(PriceBasis):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='lines')
+    source_quote_line_id = models.PositiveBigIntegerField('来源报价行 ID（快照）', null=True, blank=True)
+    name = models.CharField('产品 / 费用名称', max_length=120)
+    room = models.CharField('空间', max_length=60, blank=True)
+    specification = models.CharField('规格 / 材质', max_length=200, blank=True)
+    quantity = qty_field('数量 / 件数')
+    unit = models.CharField('计价单位', max_length=10, default='套')
+    unit_price = money_field('快照单价')
+    line_total = money_field('折后净额')
+
+    class Meta:
+        ordering = ['id']
+        constraints = [models.CheckConstraint(condition=models.Q(quantity__gt=0, unit_price__gte=0, line_total__gte=0), name='valid_order_line')]
+
+    def __str__(self):
+        return f'{self.room} · {self.name}' if self.room else self.name
 
 
 class Material(Record):
@@ -207,6 +269,7 @@ class Breakdown(Record):
 class BOMLine(models.Model):
     breakdown = models.ForeignKey(Breakdown, on_delete=models.CASCADE, related_name='lines')
     material = models.ForeignKey(Material, verbose_name='物料', on_delete=models.PROTECT)
+    order_line = models.ForeignKey(OrderLine, verbose_name='来源订单产品', on_delete=models.PROTECT, null=True, blank=True)
     quantity = qty_field('单位用量')
     waste = models.DecimalField('损耗率（0—1）', max_digits=5, decimal_places=4, default=0,
                                 validators=[MinValueValidator(Decimal('0')), MaxValueValidator(Decimal('1'))])
@@ -219,6 +282,11 @@ class BOMLine(models.Model):
         ordering = ['id']
         constraints = [models.UniqueConstraint(fields=['breakdown', 'material'], name='unique_bom_material'),
                        models.CheckConstraint(condition=models.Q(quantity__gt=0, waste__gte=0, waste__lte=1), name='valid_bom_line')]
+
+    def clean(self):
+        super().clean()
+        if self.order_line_id and self.breakdown_id and self.order_line.order_id != self.breakdown.order_id:
+            raise ValidationError('BOM 来源产品必须属于当前拆单订单。')
 
 
 class Production(Record):
@@ -241,12 +309,13 @@ class Production(Record):
 class Purchase(Record):
     module = 'purchases'
     supplier = models.CharField('供应商', max_length=150)
+    supplier_record = models.ForeignKey('Supplier',verbose_name='供应商档案',null=True,blank=True,on_delete=models.PROTECT)
     warehouse = models.ForeignKey(Warehouse, verbose_name='收货仓库', on_delete=models.PROTECT)
     due_date = models.DateField('预计到货', null=True, blank=True)
     total = money_field('采购总额')
     status = models.CharField('状态', max_length=20, default='draft', choices=[
         ('draft', '草稿'), ('review', '待审核'), ('approved', '已批准'),
-        ('ordered', '已下单'), ('received', '已收货')])
+        ('ordered', '已下单'), ('partial','部分到货'), ('received', '已收货')])
 
 
 class PurchaseLine(models.Model):
@@ -254,6 +323,7 @@ class PurchaseLine(models.Model):
     material = models.ForeignKey(Material, verbose_name='采购物料', on_delete=models.PROTECT)
     quantity = qty_field('采购数量')
     unit_price = money_field('采购单价')
+    received_qty = models.DecimalField('累计已收',max_digits=12,decimal_places=3,default=0,validators=[MinValueValidator(0)])
 
     @property
     def subtotal(self):
@@ -261,7 +331,8 @@ class PurchaseLine(models.Model):
 
     class Meta:
         ordering = ['id']
-        constraints = [models.CheckConstraint(condition=models.Q(quantity__gt=0, unit_price__gte=0), name='valid_purchase_line')]
+        constraints = [models.CheckConstraint(condition=models.Q(quantity__gt=0, unit_price__gte=0), name='valid_purchase_line'),
+                       models.CheckConstraint(condition=models.Q(received_qty__gte=0,received_qty__lte=models.F('quantity')),name='valid_received_qty')]
 
 
 class Stock(Record):
@@ -270,10 +341,16 @@ class Stock(Record):
     material = models.ForeignKey(Material, on_delete=models.PROTECT, verbose_name='物料')
     quantity = models.DecimalField('现存量', max_digits=14, decimal_places=3, default=0,
                                    validators=[MinValueValidator(Decimal('0'))])
+    reserved = models.DecimalField('已预留',max_digits=14,decimal_places=3,default=0,validators=[MinValueValidator(0)])
+
+    @property
+    def available(self):
+        return self.quantity-self.reserved
 
     class Meta(Record.Meta):
         constraints = [models.UniqueConstraint(fields=['warehouse', 'material'], name='unique_stock_location'),
-                       models.CheckConstraint(condition=models.Q(quantity__gte=0), name='nonnegative_stock')]
+                       models.CheckConstraint(condition=models.Q(quantity__gte=0), name='nonnegative_stock'),
+                       models.CheckConstraint(condition=models.Q(reserved__gte=0,reserved__lte=models.F('quantity')),name='valid_reserved_stock')]
 
 
 class StockMovement(Record):
@@ -370,3 +447,100 @@ class AuditEvent(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+
+class ChangeLine(models.Model):
+    change = models.ForeignKey(ChangeRequest, on_delete=models.CASCADE, related_name='lines')
+    operation = models.CharField('变更类型',max_length=10,choices=[('add','增项'),('update','修改'),('remove','减项')])
+    order_line = models.ForeignKey(OrderLine,on_delete=models.SET_NULL,null=True,blank=True,verbose_name='原订单产品')
+    name = models.CharField('变更后产品名称',max_length=120,blank=True)
+    room = models.CharField('空间',max_length=60,blank=True)
+    specification = models.CharField('规格',max_length=200,blank=True)
+    quantity = qty_field('变更后计价数量')
+    unit = models.CharField('单位',max_length=10,default='套')
+    unit_price = money_field('变更后单价')
+    unit_cost = money_field('变更后参考成本')
+
+    class Meta:
+        ordering = ['id']
+
+
+def private_upload_path(instance, filename):
+    from pathlib import Path
+    return f'private/{instance.organization_id}/{uuid.uuid4().hex}{Path(filename).suffix.lower()}'
+
+
+class Attachment(Record):
+    module = 'attachments'
+    object_type = models.CharField('业务模块',max_length=30)
+    object_id = models.PositiveBigIntegerField('业务对象 ID')
+    file = models.FileField('文件',upload_to=private_upload_path,max_length=250)
+    original_name = models.CharField('原文件名',max_length=200)
+    kind = models.CharField('附件类型',max_length=20,default='drawing',choices=[('drawing','图纸/方案'),('photo','现场照片'),('contract','合同/凭证')])
+    size = models.PositiveIntegerField('文件字节数')
+    sha256 = models.CharField('SHA256',max_length=64)
+
+
+class Handoff(Record):
+    module = 'handoffs'
+    order = models.OneToOneField(Order,verbose_name='门店订单',on_delete=models.PROTECT,related_name='handoff')
+    target_organization = models.ForeignKey(Organization,verbose_name='接单工厂',on_delete=models.PROTECT,related_name='incoming_handoffs')
+    payload = models.JSONField('冻结的生产快照',default=dict,editable=False)
+    status = models.CharField('交接状态',max_length=20,default='sent',choices=[('sent','待工厂接单'),('accepted','已接单'),('rejected','已拒单'),('completed','已完工回传')])
+
+    def clean(self):
+        super().clean()
+        if self.target_organization_id and (self.target_organization_id == self.organization_id or self.target_organization.kind != 'factory'):
+            raise ValidationError('接单方必须是另一家工厂组织。')
+
+
+class StockReservation(Record):
+    module = 'inventory'
+    production = models.ForeignKey(Production,on_delete=models.PROTECT,related_name='reservations',verbose_name='生产工单')
+    stock = models.ForeignKey(Stock,on_delete=models.PROTECT,verbose_name='库存位置')
+    quantity = qty_field('预留数量')
+    status = models.CharField('状态',max_length=15,default='active',choices=[('active','已预留'),('consumed','已领用'),('released','已释放')])
+
+    class Meta(Record.Meta):
+        constraints=[models.UniqueConstraint(fields=['production','stock'],condition=models.Q(status='active'),name='active_reservation_once')]
+
+
+class PurchaseReceipt(Record):
+    module = 'receipts'
+    purchase = models.ForeignKey(Purchase,on_delete=models.PROTECT,related_name='receipts',verbose_name='采购单')
+    reference = models.CharField('到货凭证号',max_length=80,unique=True)
+
+
+class ReceiptLine(models.Model):
+    receipt = models.ForeignKey(PurchaseReceipt,on_delete=models.PROTECT,related_name='lines')
+    purchase_line = models.ForeignKey(PurchaseLine,on_delete=models.PROTECT,verbose_name='采购明细')
+    quantity = qty_field('本次实收数量')
+
+
+class PaymentPlan(Record):
+    module = 'finance'
+    order = models.ForeignKey(Order,on_delete=models.PROTECT,related_name='payment_plans',verbose_name='合同订单')
+    sequence = models.PositiveIntegerField('期次')
+    name = models.CharField('期次名称',max_length=80)
+    amount = money_field('应收金额')
+    due_date = models.DateField('到期日')
+    gate = models.CharField('履约前置节点',max_length=15,choices=[('start','生产开工前'),('ship','发运前'),('complete','安装验收前')])
+
+    class Meta(Record.Meta):
+        ordering=['sequence']
+        constraints=[models.UniqueConstraint(fields=['order','sequence'],name='unique_payment_plan_sequence')]
+
+
+class Supplier(Record):
+    module='suppliers'
+    name=models.CharField('供应商名称',max_length=150)
+    contact=models.CharField('联系人',max_length=80,blank=True)
+    phone=models.CharField('联系电话',max_length=30,blank=True)
+    payment_days=models.PositiveIntegerField('账期天数',default=30)
+
+
+class FollowUp(Record):
+    module='followups'
+    customer=models.ForeignKey(Customer,on_delete=models.PROTECT,verbose_name='客户')
+    channel=models.CharField('跟进方式',max_length=30,default='电话')
+    next_date=models.DateField('下次跟进',null=True,blank=True)

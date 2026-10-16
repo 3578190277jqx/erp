@@ -51,6 +51,10 @@ USE_I18N = True
 USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+MEDIA_ROOT = Path(os.getenv('MEDIA_ROOT',str(BASE_DIR / 'media')))
+# No public MEDIA_URL route: private files only leave through scoped download views.
+FILE_UPLOAD_MAX_MEMORY_SIZE = 2 * 1024 * 1024
+DATA_UPLOAD_MAX_MEMORY_SIZE = 22 * 1024 * 1024
 STORAGES = {'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
             'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage'}}
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

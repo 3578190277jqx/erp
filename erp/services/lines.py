@@ -15,8 +15,9 @@ def add_line(user, document, values, version, delete_id=None):
         raise ValidationError('单据已冻结，不能再修改明细。')
     before = snapshot(document)
     model, key = LINE_MODELS[type(document)]
-    allowed = {'name', 'room', 'specification', 'quantity', 'unit', 'unit_price'} if isinstance(document, Quote) else (
-        {'material', 'quantity', 'waste'} if isinstance(document, Breakdown) else {'material', 'quantity', 'unit_price'})
+    allowed = {'name', 'room', 'specification', 'quantity', 'unit', 'unit_price','pricing_mode','category',
+               'width_mm','height_mm','unit_cost','discountable'} if isinstance(document, Quote) else (
+        {'material', 'quantity', 'waste','order_line'} if isinstance(document, Breakdown) else {'material', 'quantity', 'unit_price'})
     if set(values) - allowed:
         raise ValidationError('明细字段无效。')
     if delete_id:
@@ -38,8 +39,8 @@ def add_line(user, document, values, version, delete_id=None):
         line.full_clean()
         line.save()
     if isinstance(document, (Quote, Purchase)):
-        total = sum((line.subtotal for line in document.lines.all()), Decimal('0'))
-        document.total = (total * (document.discount if isinstance(document, Quote) else 1)).quantize(Decimal('.01'))
+        from .pricing import quote_amounts
+        document.total = quote_amounts(document)['total'] if isinstance(document,Quote) else sum((line.subtotal for line in document.lines.all()),Decimal(0))
     save_version(document, version)
     audit(user, document, 'delete_line' if delete_id else 'add_line', before)
     return document

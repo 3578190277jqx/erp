@@ -13,7 +13,7 @@ def move(user, warehouse, material, delta, reference, reason):
     stock, _ = Stock.objects.get_or_create(warehouse=warehouse, material=material,
                                          defaults={'organization': warehouse.organization, 'owner': user})
     stock = Stock.objects.select_for_update().get(pk=stock.pk)
-    if not Stock.objects.filter(pk=stock.pk, quantity__gte=-delta).update(quantity=F('quantity') + delta, version=F('version') + 1):
+    if not Stock.objects.filter(pk=stock.pk, quantity__gte=F('reserved')-delta).update(quantity=F('quantity') + delta, version=F('version') + 1):
         raise ValidationError(f'{material.name} 库存不足，需要 {-delta} {material.unit}，现存 {stock.quantity}。')
     stock.refresh_from_db()
     movement = StockMovement(organization=warehouse.organization, owner=user, warehouse=warehouse,
@@ -40,9 +40,9 @@ def receive_purchase(user, purchase):
     lines = list(purchase.lines.select_related('material').all())
     if not lines:
         raise ValidationError('空采购单不能收货。')
-    for line in sorted(lines, key=lambda item: item.material_id):
-        move(user, purchase.warehouse, line.material, line.quantity,
-             f'RECEIPT-{purchase.pk}-LINE-{line.pk}', f'采购收货 {purchase.code}')
+    from .materials import post_receipt
+    quantities={line.pk:line.quantity-line.received_qty for line in lines if line.quantity>line.received_qty}
+    post_receipt(user,purchase,quantities,f'AUTO-{purchase.code}-{purchase.version}')
 
 
 def issue_production(user, production):
@@ -52,5 +52,13 @@ def issue_production(user, production):
     if not lines:
         raise ValidationError('BOM 为空，不能领料。')
     for line in lines:
+        from erp.models import StockReservation
+        reservation=StockReservation.objects.select_for_update().filter(production=production,stock__warehouse=production.warehouse,
+                                                                         stock__material=line.material,status='active').first()
+        if reservation:
+            if reservation.quantity != line.required:
+                raise ValidationError('预留与 BOM 需求不一致，请释放后重新预留。')
+            Stock.objects.filter(pk=reservation.stock_id).update(reserved=F('reserved')-reservation.quantity)
+            reservation.status='consumed'; reservation.save()
         move(user, production.warehouse, line.material, -line.required,
              f'ISSUE-{production.pk}', f'生产领料 {production.code}')

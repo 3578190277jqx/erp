@@ -22,7 +22,7 @@ def record_payment(user, document, amount, reference, paid_date, method, note):
     incoming = isinstance(document, Order)
     if incoming and document.status in ('draft', 'cancelled'):
         raise ValidationError('只有已确认且未取消的订单可登记收款。')
-    if not incoming and document.status not in ('ordered', 'received'):
+    if not incoming and document.status not in ('ordered', 'partial','received'):
         raise ValidationError('采购下单后才能付款。')
     key = 'order' if incoming else 'purchase'
     paid = Payment.objects.filter(**{key: document}).aggregate(total=Sum('amount'))['total'] or 0

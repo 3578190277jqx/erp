@@ -6,7 +6,7 @@ from .models import Membership, Organization
 ALL_MODULES = {
     'customers', 'measurements', 'designs', 'quotes', 'orders', 'breakdowns', 'materials',
     'production', 'purchases', 'inventory', 'movements', 'deliveries', 'installations',
-    'aftersales', 'finance', 'changes', 'audit',
+    'aftersales', 'finance', 'changes', 'audit', 'handoffs',
 }
 ROLE_READ = {
     'boss': ALL_MODULES, 'manager': ALL_MODULES,
@@ -36,12 +36,16 @@ ROLE_WRITE = {
 
 
 def role_allows(role, module, action):
+    if module == 'handoffs':
+        return role in ('boss','manager','sales','dealer','planner','engineer') if action in ('view','export') else role in ('boss','manager','planner')
     if action in ('view', 'export'):
         return module in ROLE_READ.get(role, set())
     if action in ('approve', 'reject'):
         return role in ('boss', 'manager') and module in ('quotes', 'designs', 'purchases', 'changes')
     if action == 'release':
         return role == 'engineer' and module == 'breakdowns'
+    if action == 'reserve':
+        return role in ('warehouse','planner') and module=='production'
     if action in ('receive', 'issue', 'adjust'):
         return role == 'warehouse' and module in ('purchases', 'production', 'inventory')
     if module in ('finance',) and action in ('create', 'edit'):
@@ -111,8 +115,11 @@ def scoped(user, model, organization=None, action='view'):
                 condition &= own
             predicate |= condition
         qs = qs.filter(predicate)
+    if model.module == 'handoffs' and action in ('view','export'):
+        incoming = accessible_organizations(user,'handoffs','view')
+        qs = model.objects.filter(Q(pk__in=qs.values('pk')) | Q(target_organization__in=incoming))
     if org_id:
-        qs = qs.filter(organization_id=org_id)
+        qs = qs.filter(Q(organization_id=org_id)|Q(target_organization_id=org_id)) if model.module=='handoffs' else qs.filter(organization_id=org_id)
     return qs.distinct()
 
 
