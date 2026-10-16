@@ -37,9 +37,9 @@
 
 **Interfaces:** Produces `scoped(user, model, organization=None) -> QuerySet`, `can(user, module, action, organization=None) -> bool`, `Organization`, `Membership`, `Customer`, `Measurement`, `Design`, `Quote`, `QuoteLine`, `Order`, `Breakdown`, `BOMLine`, `Material`, `Warehouse`, `Stock`, `StockMovement`, `Production`, `Purchase`, `PurchaseLine`, `Delivery`, `Installation`, `AfterSales`, `Payment`, `ChangeRequest`, `AuditEvent`.
 
-- [ ] Write tests for organization tree scope, own-only scope, no-membership denial and non-finite/negative decimal constraints. Run tests and observe missing implementation.
-- [ ] Implement models, constraints and permissions; migrate; run domain tests.
-- [ ] Commit and push `feat: add ERP domain models and organization permissions`.
+- [x] Write tests for organization tree scope, own-only scope, no-membership denial and non-finite/negative decimal constraints. Run tests and observe missing implementation.
+- [x] Implement models, constraints and permissions; migrate; run domain tests.
+- [x] Commit and push `feat: add ERP domain models and organization permissions`.
 
 ### Task 2: Atomic business lifecycle
 
@@ -47,10 +47,10 @@
 
 **Interfaces:** Consumes Task 1 models and permissions. Produces `transition(user, obj, action, version, note='')`, `add_line(...)`, `adjust_stock(...)`, `record_payment(...)`, `approve_change(...)`. Services enforce permissions independent of views.
 
-- [ ] Write and run failing lifecycle tests: quotation total/approval/conversion, unique conversion, freeze approved lines, release BOM, production planning/issue/start/complete, delivery/install prerequisites, change maker/checker.
-- [ ] Write and run failing transaction tests: shortage rolls back all rows, stock adjustment reason and nonnegative quantities, repeat receipt/issue, overpayment, duplicate reference, stale version, negative/non-finite amount.
-- [ ] Implement explicit transactions, compare-and-swap locking, legal transitions, unique constraints and audit snapshots. Run all tests.
-- [ ] Commit and push `feat: implement furniture order production inventory and finance workflows`.
+- [x] Write and run failing lifecycle tests: quotation total/approval/conversion, unique conversion, freeze approved lines, release BOM, production planning/issue/start/complete, delivery/install prerequisites, change maker/checker.
+- [x] Write and run failing transaction tests: shortage rolls back all rows, stock adjustment reason and nonnegative quantities, repeat receipt/issue, overpayment, duplicate reference, stale version, negative/non-finite amount.
+- [x] Implement explicit transactions, compare-and-swap locking, legal transitions, unique constraints and audit snapshots. Run all tests.
+- [x] Commit and push `feat: implement furniture order production inventory and finance workflows`.
 
 ### Task 3: Usable Apple-inspired business interface
 
@@ -58,11 +58,11 @@
 
 **Interfaces:** Consumes scoped querysets and services; produces authenticated list/detail/create/edit/line/action/batch/export routes for registered modules, organization switching, dashboards and reports.
 
-- [ ] Write and run failing HTTP tests: auth redirect, CSRF, scoped details and list/export, forbidden relation IDs, approved edit denial, bulk rollback, valid form save, dashboard rendering and theme controls.
-- [ ] Implement shared navigation, filters, pagination, read views, forms, version tokens, modal confirmation, batch operations and CSV export.
-- [ ] Apply system typography, #0071e3 accent, glass toolbar, folding sidebar, density, reduced motion and light/dark themes. Financial/chart summaries use actual scoped queries.
-- [ ] Verify all tests; browser check at 1440px/390px, light/dark, create and workflow actions; capture screenshots.
-- [ ] Commit and push `feat: add responsive ERP workspace and all business module screens`.
+- [x] Write and run failing HTTP tests: auth redirect, CSRF, scoped details and list/export, forbidden relation IDs, approved edit denial, bulk rollback, valid form save, dashboard rendering and theme controls.
+- [x] Implement shared navigation, filters, pagination, read views, forms, version tokens, modal confirmation, batch operations and CSV export.
+- [x] Apply system typography, #0071e3 accent, glass toolbar, folding sidebar, density, reduced motion and light/dark themes. Financial/chart summaries use actual scoped queries.
+- [x] Verify all tests; browser check at 1440px/390px, light/dark, create and workflow actions; capture screenshots.
+- [x] Commit and push `feat: add responsive ERP workspace and all business module screens`.
 
 ### Task 4: Reproducible startup, demo data, CI and delivery
 
@@ -70,7 +70,7 @@
 
 **Interfaces:** Consumes all module/service interfaces. Produces documented fresh-install commands, random demo password, CI test/check pipeline and optional production container.
 
-- [ ] Write and run failing seed idempotency tests. Implement two isolated demo organizations, role accounts and coherent sample documents without known production credentials.
-- [ ] Verify clean SQLite install, seed twice, all tests, migration drift, collectstatic and Django deploy checks with secure environment settings.
-- [ ] Request a fresh branch review per executing-plans; fix important findings with regression tests.
-- [ ] Update validation evidence and completion statuses; commit and push. Open a reviewable draft PR and attach it to the chat if useful; keep main intact unless user asks to merge.
+- [x] Write and run failing seed idempotency tests. Implement two isolated demo organizations, role accounts and coherent sample documents without known production credentials.
+- [x] Verify clean SQLite install, seed twice, all tests, migration drift, collectstatic and Django deploy checks with secure environment settings.
+- [x] Request a fresh branch review per executing-plans; fix important findings with regression tests.
+- [x] Update validation evidence and completion statuses; commit and push. Open a reviewable draft PR and attach it to the chat if useful; keep main intact unless user asks to merge.
