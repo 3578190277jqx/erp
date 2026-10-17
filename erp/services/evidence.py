@@ -8,7 +8,7 @@ from django.core.files.base import File
 from django.db import transaction
 from django.utils import timezone
 from erp import models as m
-from erp.permissions import scoped, require_access, can
+from erp.permissions import scoped, require_access, can, memberships, member_orgs, role_allows
 from .common import audit,save_version,snapshot
 
 MAX_BYTES = 20 * 1024 * 1024
@@ -43,7 +43,13 @@ def evidence_permissions(user,parent):
         source_read=scoped(user,m.Order).filter(pk=parent.order_id).exists()
         source_edit=scoped(user,m.Order,action='edit').filter(pk=parent.order_id).exists()
         write=source_edit or parent.status in ('sent','accepted','completed') and can(user,'handoffs','accept',parent.target_organization_id)
-        manage=user.is_superuser or source_edit and can(user,'handoffs','stop_share',parent.organization_id)
+        # The management membership itself must cover the source order; a
+        # broader sales membership cannot lend its data scope to manager/own.
+        manage=user.is_superuser or source_edit and any(
+            role_allows(member.role,'handoffs','stop_share')
+            and parent.order.organization_id in member_orgs(member)
+            and (member.scope!='own' or parent.order.owner_id==user.pk)
+            for member in memberships(user))
         return EvidencePermissions(True,write,source_read,manage)
     if isinstance(parent,m.PurchaseReceipt):
         write=scoped(user,m.Purchase,action='receive').filter(pk=parent.purchase_id).exists()

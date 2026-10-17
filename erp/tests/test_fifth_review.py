@@ -106,6 +106,18 @@ class SharingTests(ERPTestCase):
         self.assertEqual(len(context['attachments']),11)
         self.assertLessEqual(len(many),len(one)+2)
 
+    def test_management_scope_cannot_be_supplied_by_a_sales_membership(self):
+        item=self.upload()
+        membership=m.Membership.objects.get(user=self.manager);membership.scope='own';membership.save()
+        m.Membership.objects.create(user=self.manager,organization=self.org,role='sales',scope='org')
+        self.assertTrue(evidence.evidence_permissions(self.manager,self.handoff).write)
+        self.assertFalse(evidence.evidence_permissions(self.manager,self.handoff).manage_sharing)
+        with self.assertRaises(PermissionDenied):self.stop(self.manager,item)
+        # The same management membership does cover an order owned by this user.
+        self.order.owner=self.manager;self.order.save(update_fields=['owner'])
+        self.stop(self.manager,item)
+        item.refresh_from_db();self.assertIsNotNone(item.archived_at)
+
     def test_readers_do_not_take_parent_write_locks(self):
         item=self.upload()
         with patch.object(m.Handoff.objects,'select_for_update',side_effect=AssertionError('GET must not lock')):
@@ -138,6 +150,23 @@ class ApprovalRecoveryTests(ERPTestCase):
         response=self.client.post('/modules/changes/batch/',{'action':'approve','ids':[change.pk],'versions':[change.version]})
         self.assertEqual(response.status_code,403)
         change.refresh_from_db();self.assertEqual(change.status,'pending')
+
+    def test_product_editors_cannot_approve_their_own_modified_proposal(self):
+        for action in ('add','remove'):
+            with self.subTest(action=action):
+                order=self.order(status='confirmed')
+                m.OrderLine.objects.create(order=order,name='原柜',quantity=1,unit_price=1000,line_total=1000)
+                change=self.change(order,requested_by=self.sales)
+                pricing.add_change_line(self.sales,change,dict(operation='add',name='增项',quantity=1,unit_price=200),change.version)
+                change.refresh_from_db()
+                if action=='add':
+                    pricing.add_change_line(self.manager,change,dict(operation='add',name='管理人增项',quantity=1,unit_price=100),change.version)
+                else:
+                    pricing.remove_change_line(self.manager,change,change.lines.get().pk,change.version)
+                change.refresh_from_db()
+                with self.assertRaises(ValidationError):services.transition(self.manager,change,'approve',change.version)
+                change.refresh_from_db();self.assertEqual(change.status,'pending')
+                services.transition(self.admin,change,'approve',change.version)
 
     def test_context_prefill_binds_order_and_organization_on_get_and_post(self):
         a=self.order(status='confirmed',owner=self.sales);a.total=850;a.save()

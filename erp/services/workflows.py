@@ -95,7 +95,8 @@ def prerequisites(user, obj, action, note):
     if isinstance(obj,m.ChangeRequest) and action=='withdraw' and obj.requested_by_id!=user.pk:
         raise ValidationError('只有真实申请人可撤回待审批变更。')
     if isinstance(obj, m.ChangeRequest) and action == 'approve':
-        last_editor = m.AuditEvent.objects.filter(object_type='changes', object_id=obj.pk, action='edit').first()
+        last_editor = m.AuditEvent.objects.filter(object_type='changes', object_id=obj.pk,
+                      action__in=('edit','add_change_line','remove_change_line')).first()
         if obj.requested_by_id == user.pk or (last_editor and last_editor.owner_id == user.pk):
             raise ValidationError('申请人不能审批自己的变更。')
         order = m.Order.objects.select_for_update().get(pk=obj.order_id)
