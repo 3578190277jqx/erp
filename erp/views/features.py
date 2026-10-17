@@ -40,7 +40,7 @@ def feature_context(request,obj):
         context['handoff']=m.Handoff.objects.filter(order=obj).first()
         context['can_handoff']=obj.kind=='sale' and obj.status=='confirmed' and scoped(request.user,m.Order,action='edit').filter(pk=obj.pk).exists() and (not context['handoff'] or context['handoff'].status in ('rejected','withdrawn'))
         context['factories']=collaboration.allowed_factories(request.user,obj.organization)
-        context['can_withdraw_handoff']=bool(context['handoff'] and context['handoff'].status=='sent' and scoped(request.user,m.Order,action='edit').filter(pk=obj.pk).exists())
+        context['can_withdraw_handoff']=bool(context['handoff'] and context['handoff'].status=='sent' and collaboration.can_withdraw_handoff(request.user,context['handoff']))
     if isinstance(obj,m.Production):
         context['can_reserve']=obj.status=='planned' and scoped(request.user,m.Production,action='reserve').filter(pk=obj.pk).exists()
         context['reservations']=obj.reservations.select_related('stock__material').all()
@@ -90,7 +90,8 @@ def feature_context(request,obj):
         context['change_form']=form
         context['can_change_lines']=obj.status=='pending' and scoped(request.user,m.ChangeRequest,action='edit').filter(pk=obj.pk).exists()
     if obj.module in evidence.PARENTS:
-        context['attachments']=m.Attachment.objects.filter(organization=obj.organization,object_type=obj.module,object_id=obj.pk,deleted_at__isnull=True).select_related('owner')
+        context['attachments']=list(m.Attachment.objects.filter(organization=obj.organization,object_type=obj.module,object_id=obj.pk,deleted_at__isnull=True).select_related('owner'))
+        for item in context['attachments']:item.can_delete=evidence.can_delete_evidence(request.user,obj,item)
         context['can_attach']=evidence.can_write_evidence(request.user,obj)
         context['shared_evidence']=isinstance(obj,m.Handoff)
     context['today_iso']=str(timezone.localdate())

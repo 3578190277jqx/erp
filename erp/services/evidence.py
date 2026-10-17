@@ -38,6 +38,11 @@ def can_write_evidence(user,parent):
     return scoped(user,type(parent),action='edit').filter(pk=parent.pk).exists()
 
 
+def can_delete_evidence(user,parent,item):
+    if isinstance(parent,m.Handoff) and item.owner_id!=user.pk and not user.is_superuser:return False
+    return can_write_evidence(user,parent)
+
+
 def require_evidence_write(user,parent):
     if not can_write_evidence(user,parent):raise PermissionDenied('没有此单据的附件维护权限。')
 
@@ -114,6 +119,7 @@ def delete_attachment(user,item,version):
     require_evidence_write(user,parent)
     item=m.Attachment.objects.select_for_update().get(pk=item.pk)
     if item.organization_id!=parent.organization_id:raise PermissionDenied('附件组织不匹配。')
+    if not can_delete_evidence(user,parent,item):raise PermissionDenied('交接附件仅上传者或系统管理员可删除，并须保留当前单据维护权限。')
     try:expected=int(version)
     except (ValueError,TypeError):raise ValidationError('缺少有效版本。')
     if item.deleted_at or item.version!=expected:raise ValidationError('附件已删除或版本变化，请刷新。')

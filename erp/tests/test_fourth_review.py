@@ -85,3 +85,83 @@ class ChangeIntentTests(ERPTestCase):
         self.assertContains(response,'本次操作 1 条')
         self.assertContains(response,'拟产品 1 条')
         self.assertContains(response,'完整性需人工核对')
+
+
+class CollaborationOwnershipTests(ERPTestCase):
+    def setUp(self):
+        super().setUp()
+        from django.contrib.auth.models import User
+        from erp.services import collaboration
+        self.factory=m.Organization.objects.create(name='仅接单工厂',kind='factory')
+        self.receiver=User.objects.create_user('factory-only')
+        self.membership=m.Membership.objects.create(user=self.receiver,organization=self.factory,role='planner',scope='org')
+        m.CollaborationRoute.objects.create(source=self.org,target=self.factory)
+        self.source=self.order(status='confirmed',owner=self.sales)
+        m.OrderLine.objects.create(order=self.source,name='柜体',quantity=1,unit_price=1000,line_total=1000)
+        self.handoff=collaboration.send_handoff(self.sales,self.source,self.factory,self.source.version)
+
+    def upload(self,user,name):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from erp.services import evidence
+        return evidence.upload_attachment(user,self.handoff,SimpleUploadedFile(name,b'%PDF-1.7 ownership fixture'),'drawing',
+                 share_confirmed=True,parent_version=self.handoff.version,target_id=self.factory.pk)
+
+    def test_both_sides_cannot_delete_each_others_files_but_owner_and_superuser_can(self):
+        from tempfile import TemporaryDirectory
+        from django.test import override_settings
+        from erp.services import evidence
+        with TemporaryDirectory() as folder,override_settings(MEDIA_ROOT=folder):
+            source=self.upload(self.sales,'门店图纸.pdf');factory=self.upload(self.receiver,'工厂照片.pdf')
+            with self.assertRaises(PermissionDenied):evidence.delete_attachment(self.receiver,source,source.version)
+            with self.assertRaises(PermissionDenied):evidence.delete_attachment(self.sales,factory,factory.version)
+            with self.assertRaises(PermissionDenied):evidence.delete_attachment(self.manager,source,source.version)
+            evidence.delete_attachment(self.sales,source,source.version)
+            source.refresh_from_db();self.assertIsNotNone(source.deleted_at)
+            evidence.delete_attachment(self.admin,factory,factory.version)
+            factory.refresh_from_db();self.assertIsNotNone(factory.deleted_at)
+
+    def test_http_only_own_file_gets_delete_control_and_cross_delete_is_forbidden(self):
+        from tempfile import TemporaryDirectory
+        from django.test import override_settings
+        with TemporaryDirectory() as folder,override_settings(MEDIA_ROOT=folder):
+            source=self.upload(self.sales,'门店图纸.pdf');factory=self.upload(self.receiver,'工厂照片.pdf')
+            self.client.force_login(self.receiver);response=self.client.get(f'/modules/handoffs/{self.handoff.pk}/')
+            self.assertNotContains(response,f'action="/attachments/{source.pk}/delete/"')
+            self.assertContains(response,f'action="/attachments/{factory.pk}/delete/"')
+            response=self.client.post(f'/attachments/{source.pk}/delete/',{'version':source.version})
+            self.assertEqual(response.status_code,403)
+            source.refresh_from_db();self.assertIsNone(source.deleted_at)
+            response=self.client.post(f'/attachments/{factory.pk}/delete/',{'version':factory.version})
+            self.assertEqual(response.status_code,302)
+            factory.refresh_from_db();self.assertIsNotNone(factory.deleted_at)
+
+    def test_uploader_still_needs_current_parent_business_permission(self):
+        from tempfile import TemporaryDirectory
+        from django.test import override_settings
+        from erp.services import evidence
+        with TemporaryDirectory() as folder,override_settings(MEDIA_ROOT=folder):
+            item=self.upload(self.receiver,'工厂照片.pdf')
+            self.membership.role='engineer';self.membership.save()
+            with self.assertRaises(PermissionDenied):evidence.delete_attachment(self.receiver,item,item.version)
+            item.refresh_from_db();self.assertIsNone(item.deleted_at)
+
+    def test_role_gate_and_order_scope_both_control_withdrawal(self):
+        from unittest.mock import patch
+        from erp.permissions import role_allows
+        from erp.services import collaboration
+        def policy(role,module,action):
+            return False if module=='handoffs' and action=='withdraw' else role_allows(role,module,action)
+        with patch('erp.permissions.role_allows',side_effect=policy):
+            self.assertNotIn('withdraw',dict(collaboration.handoff_actions(self.sales,self.handoff)))
+            self.client.force_login(self.sales)
+            self.assertNotContains(self.client.get(f'/modules/orders/{self.source.pk}/'),'data-action="withdraw"')
+            response=self.client.post(f'/modules/handoffs/{self.handoff.pk}/action/',
+                                      {'action':'withdraw','version':self.handoff.version,'note':'角色撤回权限停用'})
+            self.assertEqual(response.status_code,403)
+        self.handoff.refresh_from_db();self.assertEqual(self.handoff.status,'sent')
+
+    def test_new_factory_order_has_confirmed_noncommercial_basis(self):
+        from erp.services import collaboration
+        local=collaboration.accept_handoff(self.receiver,self.handoff,self.handoff.version)
+        self.assertEqual(local.kind,'manufacturing');self.assertEqual(local.total,0)
+        self.assertTrue(local.discount_confirmed)

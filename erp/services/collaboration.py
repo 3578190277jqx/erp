@@ -77,7 +77,7 @@ def accept_handoff(user,handoff,version,reject=False,note=''):
     customer,_ = m.Customer.objects.get_or_create(organization=target,internal_source=handoff.organization,
                    defaults={'owner':user,'name':f'{handoff.organization.name} · 生产协作','phone':'内部协作','source':'门厂交接','is_internal':True})
     order = m.Order.objects.create(organization=target,owner=user,customer=customer,title=handoff.payload['title'],
-                                   kind='manufacturing',source_handoff=handoff,status='confirmed',
+                                   kind='manufacturing',source_handoff=handoff,status='confirmed',discount_confirmed=True,
                                    due_date=source.due_date,contract_number=f'JOB-{handoff.code}')
     for line in handoff.payload['lines']:
         m.OrderLine.objects.create(order=order,**line,line_total=0,unit_price=0,unit_cost=0)
@@ -88,12 +88,16 @@ def accept_handoff(user,handoff,version,reject=False,note=''):
     return order
 
 
+def can_withdraw_handoff(user,handoff):
+    return can(user,'handoffs','withdraw',handoff.organization_id) and scoped(user,m.Order,action='edit').filter(pk=handoff.order_id).exists()
+
+
 def handoff_actions(user,handoff):
     from .workflows import available_actions
     result=[]
     for action,label in available_actions(handoff):
         if action=='withdraw':
-            allowed=scoped(user,m.Order,action='edit').filter(pk=handoff.order_id).exists()
+            allowed=can_withdraw_handoff(user,handoff)
         else:
             allowed=can(user,'handoffs','accept',handoff.target_organization_id)
             if action=='accept' and not user.is_superuser:
@@ -106,6 +110,8 @@ def handoff_actions(user,handoff):
 def withdraw_handoff(user,handoff,version,note):
     source=m.Order.objects.select_for_update().get(pk=handoff.order_id)
     require_access(user,source,'edit')
+    if not can(user,'handoffs','withdraw',source.organization_id):
+        raise PermissionDenied('当前角色没有源门店交接撤回权限。')
     handoff=m.Handoff.objects.select_for_update().get(pk=handoff.pk)
     try:expected=int(version)
     except (ValueError,TypeError):raise ValidationError('缺少有效交接版本。')
