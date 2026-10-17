@@ -1,3 +1,35 @@
+# 验证记录 · v1.1.4 五次评审修正
+
+2026-10-17，最终功能提交 `2c65a65`。**147用例**：SQLite139通过/8个PG专用跳过；PostgreSQL146通过/1个SQLite备份专用跳过。Ubuntu/Windows×Python3.12/3.13和PostgreSQL16五组CI全绿，实际日志已核对：[运行日志](https://github.com/3578190277jqx/erp/actions/runs/39020960795)。原PR Checks跟踪后续文档和截图提交。
+
+- 新增18个第五轮回归和1个PG竞争；原128用例、历史迁移和原7个PG竞争保持。来源篡改、批量POST、离职上传者、多角色范围、失效行逐一恢复、真实0与未知、正负差额均有覆盖。
+- PG新竞争使用独立连接和事件：工厂先读旧附件元数据，源店提交停止共享，再进行版本确认；工厂最终PermissionDenied。原改派/读取竞争仍通过。
+- 一次独立全变更审查发现多角色范围拼接、行操作修改后自批两项，均RED→GREEN修正；增加/移除行均计入最后编辑人，未留置已确认重要发现。
+- 预升级SQLite与media备份保留在忽略目录，integrity_check=ok，0017实际应用。0017仅更改字段说明，不重写旧合同、文件及归档值。
+- 系统check、迁移无漂移、collectstatic、生产check --deploy --fail-level WARNING通过。
+- Chrome源店普通manager在交接已撤回时停止管理员上传的虚构PDF，原因与版本随确认提交，归档后源店下载200；同厂重发后工厂详情200、文件不在列表且下载403。DB确认archived_at非空、deleted_at为空、物理文件存在，交接sent/目标4。
+- Chrome订单14新建变更：金额预填1000，订单与组织disabled；服务端篡改忽略由自动回归验证。待批列表无批量批准，伪造入口403由回归验证。
+- Chrome虚构恢复样例订单15/申请9：A先删原产品令B两个引用SET_NULL；逐一移除2→1→0，剩一条时继续待核对且无批准入口。清完仍受订单旧版本限制，管理员编辑明确核对后由另一店长批准，最终0元/0产品，两次移除均有审计。未改既有真实业务凭证。
+- Chrome390×844历史差异页显示850→900、+¥50.00，scrollWidth=390。主业务会话控制台0错误/0警告；目标厂验证拒绝下载产生预期403，不计为页面故障。
+
+规则及边界见[U1–U6处理记录](V114_FIFTH_REVIEW_RESPONSE.md)。归档不自动恢复，已经下载或正在传输的副本无法收回；变更逐单核对，恢复后须明确编辑重新核对订单版本。
+
+![停止共享确认与副本限制](screenshots/v114-stop-sharing-confirm.png)
+
+![源店保留归档](screenshots/v114-stopped-archive.png)
+
+![绑定预填来源订单](screenshots/v114-bound-order.png)
+
+![失效行明确待核对](screenshots/v114-stale-review.png)
+
+![清理并编辑核对后可由另一人审批](screenshots/v114-recovered-review.png)
+
+![手机正负金额对比](screenshots/v114-mobile-review.png)
+
+---
+
+以下为前轮验证历史，数字与读取锁策略仅代表当时版本；当前读取策略以v1.1.4为准。
+
 # 验证记录 · v1.1.3 四次评审修正
 
 2026-10-17，功能提交 `128c512`。**128用例**：SQLite121通过/7个PG专用跳过；PostgreSQL127通过/1个SQLite备份专用跳过。Ubuntu/Windows×Python3.12/3.13和PostgreSQL16五组CI全绿：[运行日志](https://github.com/3578190277jqx/erp/actions/runs/39017457480)。后续文档提交以原PR Checks为准。
