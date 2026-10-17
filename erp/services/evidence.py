@@ -2,7 +2,7 @@ import hashlib
 import logging
 import re
 from pathlib import Path
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError, ObjectDoesNotExist
 from django.core.files.base import File
 from django.db import transaction
 from django.utils import timezone
@@ -115,7 +115,7 @@ def authorized_attachment(user,pk):
         # Re-read metadata after locking the parent; retarget/delete lock the
         # same parent first, so a receiver cannot see a new target with old flags.
         item=m.Attachment.objects.get(pk=pk,deleted_at__isnull=True)
-    except (m.Attachment.DoesNotExist,KeyError):
+    except (ObjectDoesNotExist,KeyError):
         raise PermissionDenied('附件不可用。')
     if not scoped(user,parent_model).filter(pk=parent.pk,organization_id=item.organization_id).exists():
         raise PermissionDenied('附件不在当前授权范围。')

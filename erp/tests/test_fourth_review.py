@@ -203,3 +203,12 @@ class CollaborationOwnershipTests(ERPTestCase):
             self.client.force_login(self.sales)
             response=self.client.get(f'/modules/handoffs/{self.handoff.pk}/')
             self.assertContains(response,'旧厂专用图纸.pdf');self.assertContains(response,'已归档')
+
+    def test_orphan_attachment_authorization_denies_instead_of_server_error(self):
+        from tempfile import TemporaryDirectory
+        from django.test import override_settings
+        from erp.services import evidence
+        with TemporaryDirectory() as folder,override_settings(MEDIA_ROOT=folder):
+            item=self.upload(self.sales,'历史孤立附件.pdf')
+            self.handoff.delete()
+            with self.assertRaises(PermissionDenied):evidence.authorized_attachment(self.sales,item.pk)
