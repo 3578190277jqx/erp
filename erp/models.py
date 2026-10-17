@@ -505,6 +505,8 @@ class Attachment(Record):
     deleted_at = models.DateTimeField('删除时间',null=True,blank=True,editable=False)
     purged_at = models.DateTimeField('文件清理时间',null=True,blank=True,editable=False)
     archived_at = models.DateTimeField('交接附件归档时间',null=True,blank=True,editable=False)
+    archive_reason = models.CharField('归档原因类别',max_length=16,blank=True,default='',editable=False,
+                         choices=[('reassigned','改派归档'),('stopped','人工停止共享')])
 
 
 class Handoff(Record):

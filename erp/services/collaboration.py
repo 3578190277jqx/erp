@@ -8,6 +8,11 @@ from .common import lock, save_version, audit, snapshot, system_update
 PRODUCTION_FIELDS = ('name','room','specification','quantity','unit','pricing_mode','category','width_mm','height_mm')
 
 
+def route_enabled(user,handoff):
+    return user.is_superuser or m.CollaborationRoute.objects.filter(
+        source_id=handoff.organization_id,target_id=handoff.target_organization_id,enabled=True).exists()
+
+
 def allowed_factories(user,source):
     if not can(user,'orders','edit',source.pk):return m.Organization.objects.none()
     factories=m.Organization.objects.filter(kind='factory').exclude(pk=source.pk)
@@ -37,7 +42,7 @@ def send_handoff(user,order,target,version,note='',handoff_version=None):
         if files:
             before={'target':existing.target_organization_id,'attachments':[snapshot(item) for item in files]}
             for item in files:
-                item.archived_at=timezone.now();save_version(item,item.version)
+                item.archived_at=timezone.now();item.archive_reason='reassigned';save_version(item,item.version)
             audit(user,existing,'archive_handoff_evidence',before,
                   after={'target':target.pk,'attachments':[snapshot(item) for item in files],
                          'policy':'保留旧工厂证据，仅源门店可查阅，不向新工厂共享。'})
@@ -67,7 +72,7 @@ def accept_handoff(user,handoff,version,reject=False,note=''):
     handoff = m.Handoff.objects.select_for_update().get(pk=handoff.pk)
     if not can(user,'handoffs','accept',handoff.target_organization_id):
         raise PermissionDenied('只有接单工厂的授权人员可处理交接。')
-    if not reject and not user.is_superuser and not m.CollaborationRoute.objects.filter(source_id=source.organization_id,target_id=handoff.target_organization_id,enabled=True).exists():
+    if not reject and not route_enabled(user,handoff):
         raise PermissionDenied('源门店与本工厂的协作授权未启用，请联系管理员。')
     if handoff.status != 'sent' or handoff.version != int(version):
         raise ValidationError('交接状态或版本已变化，请刷新。')
@@ -109,8 +114,7 @@ def handoff_actions(user,handoff):
             allowed=can_withdraw_handoff(user,handoff)
         else:
             allowed=can(user,'handoffs','accept',handoff.target_organization_id)
-            if action=='accept' and not user.is_superuser:
-                allowed=allowed and m.CollaborationRoute.objects.filter(source_id=handoff.organization_id,target_id=handoff.target_organization_id,enabled=True).exists()
+            if action=='accept':allowed=allowed and route_enabled(user,handoff)
         if allowed:result.append((action,label))
     return result
 

@@ -6,7 +6,7 @@ from django.test import TransactionTestCase
 
 
 class HistoricalUpgradeTests(TransactionTestCase):
-    latest=('erp','0017_clarify_evidence_archive_label')
+    latest=('erp','0018_classify_evidence_archive')
 
     def tearDown(self):
         MigrationExecutor(connection).migrate([self.latest])
@@ -93,3 +93,25 @@ class HistoricalUpgradeTests(TransactionTestCase):
         self.assertIsNone(fresh.archived_at);self.assertIsNone(fresh.deleted_at)
         self.assertEqual(m.Order.objects.get(pk=order.pk).total,1000)
         self.assertEqual(m.Handoff.objects.get(pk=handoff.pk).target_organization_id,factory.pk)
+
+    def test_v114_archive_reason_is_backfilled_only_from_matching_audit(self):
+        from django.utils import timezone
+        old=('erp','0017_clarify_evidence_archive_label')
+        executor=MigrationExecutor(connection);executor.migrate([old]);apps=executor.loader.project_state([old]).apps
+        user=apps.get_model('auth','User').objects.create(username='reason-history',password='!')
+        org=apps.get_model('erp','Organization').objects.create(name='归档历史店')
+        common={'organization_id':org.pk,'owner_id':user.pk}
+        Attachment=apps.get_model('erp','Attachment');Event=apps.get_model('erp','AuditEvent');at=timezone.now()
+        items=[Attachment.objects.create(**common,code=f'CAUSE-{i}',object_type='handoffs',object_id=10,
+              file=f'private/old-{i}.pdf',original_name='旧证据.pdf',size=12,sha256='a'*64,archived_at=at,version=3) for i in range(3)]
+        Event.objects.create(**common,object_type='handoffs',object_id=10,code='H',action='stop_sharing_attachment',after={'attachment':items[0].code})
+        Event.objects.create(**common,object_type='handoffs',object_id=10,code='H',action='archive_handoff_evidence',after={'attachments':[{'code':items[1].code}]})
+        # The third archive has an event for a different parent: do not guess.
+        Event.objects.create(**common,object_type='handoffs',object_id=99,code='OTHER',action='stop_sharing_attachment',after={'attachment':items[2].code})
+        MigrationExecutor(connection).migrate([self.latest])
+        from erp import models as m
+        fresh=[m.Attachment.objects.get(pk=item.pk) for item in items]
+        self.assertEqual([i.archive_reason for i in fresh],['stopped','reassigned',''])
+        self.assertEqual([i.version for i in fresh],[3,3,3]);self.assertTrue(all(i.archived_at==at for i in fresh))
+        self.assertEqual([i.file.name for i in fresh],[f'private/old-{i}.pdf' for i in range(3)])
+        self.assertTrue(all(i.sha256=='a'*64 and i.deleted_at is None for i in fresh))

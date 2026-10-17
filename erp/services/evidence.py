@@ -40,9 +40,11 @@ def evidence_permissions(user,parent):
     visible=scoped(user,type(parent)).filter(pk=parent.pk).exists()
     if not visible:return EvidencePermissions()
     if isinstance(parent,m.Handoff):
+        from .collaboration import route_enabled
         source_read=scoped(user,m.Order).filter(pk=parent.order_id).exists()
         source_edit=scoped(user,m.Order,action='edit').filter(pk=parent.order_id).exists()
-        write=source_edit or parent.status in ('sent','accepted','completed') and can(user,'handoffs','accept',parent.target_organization_id)
+        write=source_edit or (parent.status in ('sent','accepted','completed')
+              and can(user,'handoffs','accept',parent.target_organization_id) and route_enabled(user,parent))
         # The management membership itself must cover the source order; a
         # broader sales membership cannot lend its data scope to manager/own.
         manage=user.is_superuser or source_edit and any(
@@ -128,18 +130,17 @@ def _same_version(parent):
 
 
 def attachment_context(user,parent):
-    """Read a coherent sharing snapshot, without a write lock on GET."""
-    for _ in range(2):
-        try:current=type(parent).objects.get(pk=parent.pk)
-        except ObjectDoesNotExist:return [],EvidencePermissions(),True
-        if current.version!=parent.version:return [],EvidencePermissions(),True
-        rights=evidence_permissions(user,current)
-        if not rights.visible:return [],rights,False
-        files=m.Attachment.objects.filter(organization=current.organization,object_type=current.module,
-                  object_id=current.pk,deleted_at__isnull=True).select_related('owner')
-        if not rights.archived_read:files=files.filter(archived_at__isnull=True)
-        files=list(files)
-        if _same_version(current):return files,rights,False
+    """One snapshot matching the rendered parent; a new version needs refresh."""
+    try:current=type(parent).objects.get(pk=parent.pk)
+    except ObjectDoesNotExist:return [],EvidencePermissions(),True
+    if current.version!=parent.version:return [],EvidencePermissions(),True
+    rights=evidence_permissions(user,current)
+    if not rights.visible:return [],rights,False
+    files=m.Attachment.objects.filter(organization=current.organization,object_type=current.module,
+              object_id=current.pk,deleted_at__isnull=True).select_related('owner')
+    if not rights.archived_read:files=files.filter(archived_at__isnull=True)
+    files=list(files)
+    if _same_version(current):return files,rights,False
     return [],EvidencePermissions(),True
 
 
@@ -181,7 +182,8 @@ def stop_sharing_attachment(user,item,version,parent_version,reason):
     if item.deleted_at or item.archived_at or item.version!=expected or parent.version!=expected_parent:
         raise ValidationError('附件已停止共享、已删除或版本变化，请刷新。')
     before={'handoff':snapshot(parent),'attachment':snapshot(item)}
-    item.archived_at=timezone.now();save_version(item,expected);save_version(parent,expected_parent)
+    item.archived_at=timezone.now();item.archive_reason='stopped'
+    save_version(item,expected);save_version(parent,expected_parent)
     audit(user,parent,'stop_sharing_attachment',before,after={'attachment':item.code,'reason':reason,
           'archived_at':str(item.archived_at),'sha256':item.sha256,'policy':'文件保留，仅源门店可查阅，不自动恢复共享。'})
     return item
@@ -212,5 +214,6 @@ def delete_attachment(user,item,version):
     except (ValueError,TypeError):raise ValidationError('缺少有效版本。')
     if item.deleted_at or item.version!=expected:raise ValidationError('附件已删除或版本变化，请刷新。')
     before=snapshot(item);item.deleted_at=timezone.now();save_version(item,expected)
+    save_version(parent,parent.version)
     audit(user,parent,'delete_attachment',before=before,after={'attachment':item.code,'sha256':item.sha256,'deleted_at':str(item.deleted_at)})
     transaction.on_commit(lambda:purge_attachment_file(item.pk))

@@ -191,3 +191,40 @@ class PostgreSQLBusinessRaces(TransactionTestCase):
             with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(run,['read','write']))
         self.assertCountEqual(results,['blocked','stopped'])
         item.refresh_from_db();self.assertIsNotNone(item.archived_at)
+
+    def test_delete_between_metadata_and_version_check_denies_receiver(self):
+        from threading import Event
+        from unittest.mock import patch
+        from django.core.exceptions import PermissionDenied
+        from erp.services import collaboration,evidence
+        factory=m.Organization.objects.create(name='删除竞争工厂',kind='factory')
+        receiver=User.objects.create_user('deleted-reader')
+        m.Membership.objects.create(user=receiver,organization=factory,role='planner',scope='org')
+        m.OrderLine.objects.create(order=self.order,name='柜体',quantity=1,unit_price=1000,line_total=1000)
+        handoff=collaboration.send_handoff(self.actor,self.order,factory,self.order.version)
+        item=m.Attachment.objects.create(**self.common,object_type='handoffs',object_id=handoff.pk,
+               file='private/synthetic-delete.pdf',original_name='虚构图纸.pdf',size=1,sha256='c'*64)
+        metadata_read=Event();deleted=Event();same_version=evidence._same_version
+        def interleave(parent):
+            metadata_read.set()
+            if not deleted.wait(10):raise AssertionError('deletion did not finish')
+            return same_version(parent)
+        def run(which):
+            close_old_connections()
+            try:
+                if which=='write':
+                    if not metadata_read.wait(10):raise AssertionError('reader did not reach version check')
+                    # Keep physical bytes deliberately outside this test: it
+                    # proves authorization even before deferred purge executes.
+                    with patch('erp.services.evidence.purge_attachment_file'):
+                        evidence.delete_attachment(User.objects.get(pk=self.actor.pk),m.Attachment.objects.get(pk=item.pk),1)
+                    deleted.set();return 'deleted'
+                try:evidence.authorized_attachment(User.objects.get(pk=receiver.pk),item.pk)
+                except PermissionDenied:return 'blocked'
+                return 'disclosed'
+            finally:connections.close_all()
+        with patch('erp.services.evidence._same_version',side_effect=interleave):
+            with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(run,['read','write']))
+        self.assertCountEqual(results,['blocked','deleted'])
+        item.refresh_from_db();handoff.refresh_from_db()
+        self.assertIsNotNone(item.deleted_at);self.assertEqual(handoff.version,2)
