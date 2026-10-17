@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import hashlib
 import logging
 import re
@@ -27,25 +28,48 @@ def valid_signature(extension, content):
     }.get(extension,False)
 
 
-def can_write_evidence(user,parent):
-    if not scoped(user,type(parent)).filter(pk=parent.pk).exists():return False
+@dataclass(frozen=True)
+class EvidencePermissions:
+    visible: bool=False
+    write: bool=False
+    archived_read: bool=False
+    manage_sharing: bool=False
+
+
+def evidence_permissions(user,parent):
+    visible=scoped(user,type(parent)).filter(pk=parent.pk).exists()
+    if not visible:return EvidencePermissions()
     if isinstance(parent,m.Handoff):
-        return (scoped(user,m.Order,action='edit').filter(pk=parent.order_id).exists() or
-                parent.status in ('sent','accepted','completed') and can(user,'handoffs','accept',parent.target_organization_id))
+        source_read=scoped(user,m.Order).filter(pk=parent.order_id).exists()
+        source_edit=scoped(user,m.Order,action='edit').filter(pk=parent.order_id).exists()
+        write=source_edit or parent.status in ('sent','accepted','completed') and can(user,'handoffs','accept',parent.target_organization_id)
+        manage=user.is_superuser or source_edit and can(user,'handoffs','stop_share',parent.organization_id)
+        return EvidencePermissions(True,write,source_read,manage)
     if isinstance(parent,m.PurchaseReceipt):
-        return scoped(user,m.Purchase,action='receive').filter(pk=parent.purchase_id).exists()
-    if isinstance(parent,m.Production) and scoped(user,m.Production,action='issue').filter(pk=parent.pk).exists():return True
-    return scoped(user,type(parent),action='edit').filter(pk=parent.pk).exists()
+        write=scoped(user,m.Purchase,action='receive').filter(pk=parent.purchase_id).exists()
+    elif isinstance(parent,m.Production) and scoped(user,m.Production,action='issue').filter(pk=parent.pk).exists():write=True
+    else:write=scoped(user,type(parent),action='edit').filter(pk=parent.pk).exists()
+    return EvidencePermissions(True,write)
+
+
+def can_write_evidence(user,parent):
+    return evidence_permissions(user,parent).write
 
 
 def can_view_archived_evidence(user,parent):
-    return isinstance(parent,m.Handoff) and scoped(user,m.Order).filter(pk=parent.order_id).exists()
+    return evidence_permissions(user,parent).archived_read
 
 
-def can_delete_evidence(user,parent,item):
-    if item.archived_at and not can_view_archived_evidence(user,parent):return False
+def can_delete_evidence(user,parent,item,permissions=None):
+    rights=permissions or evidence_permissions(user,parent)
+    if item.archived_at and not rights.archived_read:return False
     if isinstance(parent,m.Handoff) and item.owner_id!=user.pk and not user.is_superuser:return False
-    return can_write_evidence(user,parent)
+    return rights.write
+
+
+def can_stop_sharing(user,parent,item,permissions=None):
+    rights=permissions or evidence_permissions(user,parent)
+    return isinstance(parent,m.Handoff) and not item.archived_at and not item.deleted_at and rights.write and (item.owner_id==user.pk or rights.manage_sharing)
 
 
 def require_evidence_write(user,parent):
@@ -93,34 +117,67 @@ def upload_attachment(user,parent,file,kind,share_confirmed=False,parent_version
     return item
 
 
-@transaction.atomic
+def _same_version(parent):
+    return type(parent).objects.filter(pk=parent.pk,version=parent.version).exists()
+
+
+def attachment_context(user,parent):
+    """Read a coherent sharing snapshot, without a write lock on GET."""
+    for _ in range(2):
+        try:current=type(parent).objects.get(pk=parent.pk)
+        except ObjectDoesNotExist:return [],EvidencePermissions(),True
+        if current.version!=parent.version:return [],EvidencePermissions(),True
+        rights=evidence_permissions(user,current)
+        if not rights.visible:return [],rights,False
+        files=m.Attachment.objects.filter(organization=current.organization,object_type=current.module,
+                  object_id=current.pk,deleted_at__isnull=True).select_related('owner')
+        if not rights.archived_read:files=files.filter(archived_at__isnull=True)
+        files=list(files)
+        if _same_version(current):return files,rights,False
+    return [],EvidencePermissions(),True
+
+
 def visible_attachments(user,parent):
-    if isinstance(parent,m.Handoff):
-        # The parent lock makes the current sharing target and archive flags a
-        # consistent read even when a detail request races a reassignment.
-        parent=m.Handoff.objects.select_for_update().get(pk=parent.pk)
-        if not scoped(user,m.Handoff).filter(pk=parent.pk).exists():return []
-    files=m.Attachment.objects.filter(organization=parent.organization,object_type=parent.module,
-              object_id=parent.pk,deleted_at__isnull=True).select_related('owner')
-    if not can_view_archived_evidence(user,parent):files=files.filter(archived_at__isnull=True)
-    return list(files)
+    return attachment_context(user,parent)[0]
+
+
+def authorized_attachment(user,pk):
+    for _ in range(2):
+        try:
+            identity=m.Attachment.objects.get(pk=pk,deleted_at__isnull=True)
+            parent_model=PARENTS[identity.object_type]
+            parent=parent_model.objects.get(pk=identity.object_id)
+            rights=evidence_permissions(user,parent)
+            item=m.Attachment.objects.get(pk=pk,deleted_at__isnull=True)
+        except (ObjectDoesNotExist,KeyError):raise PermissionDenied('附件不可用。')
+        if item.object_type!=identity.object_type or item.object_id!=parent.pk or item.organization_id!=parent.organization_id:
+            raise PermissionDenied('附件关联已变化。')
+        if not rights.visible or item.archived_at and not rights.archived_read:
+            raise PermissionDenied('附件不在当前授权范围，归档仅源门店可查阅。')
+        if _same_version(parent):return item
+    raise PermissionDenied('共享范围正在变化，请刷新后重试。')
 
 
 @transaction.atomic
-def authorized_attachment(user,pk):
-    try:
-        identity=m.Attachment.objects.get(pk=pk,deleted_at__isnull=True)
-        parent_model=PARENTS[identity.object_type]
-        parent=parent_model.objects.select_for_update().get(pk=identity.object_id)
-        # Re-read metadata after locking the parent; retarget/delete lock the
-        # same parent first, so a receiver cannot see a new target with old flags.
-        item=m.Attachment.objects.get(pk=pk,deleted_at__isnull=True)
-    except (ObjectDoesNotExist,KeyError):
-        raise PermissionDenied('附件不可用。')
-    if not scoped(user,parent_model).filter(pk=parent.pk,organization_id=item.organization_id).exists():
-        raise PermissionDenied('附件不在当前授权范围。')
-    if item.archived_at and not can_view_archived_evidence(user,parent):
-        raise PermissionDenied('旧交接归档仅源门店可查阅。')
+def stop_sharing_attachment(user,item,version,parent_version,reason):
+    if item.object_type!='handoffs':raise ValidationError('只有交接附件支持停止共享。')
+    parent=m.Handoff.objects.select_for_update().get(pk=item.object_id)
+    item=m.Attachment.objects.select_for_update().get(pk=item.pk)
+    rights=evidence_permissions(user,parent)
+    if item.object_type!='handoffs' or item.object_id!=parent.pk or item.organization_id!=parent.organization_id:
+        raise PermissionDenied('附件关联不匹配。')
+    if not rights.write or not (item.owner_id==user.pk or rights.manage_sharing):
+        raise PermissionDenied('仅有当前维护权的上传者或源门店管理人员可停止共享。')
+    reason=(reason or '').strip()
+    if not reason or len(reason)>5000:raise ValidationError('请填写1至5000字的停止共享原因。')
+    try:expected,expected_parent=int(version),int(parent_version)
+    except (ValueError,TypeError):raise ValidationError('缺少有效附件与交接版本。')
+    if item.deleted_at or item.archived_at or item.version!=expected or parent.version!=expected_parent:
+        raise ValidationError('附件已停止共享、已删除或版本变化，请刷新。')
+    before={'handoff':snapshot(parent),'attachment':snapshot(item)}
+    item.archived_at=timezone.now();save_version(item,expected);save_version(parent,expected_parent)
+    audit(user,parent,'stop_sharing_attachment',before,after={'attachment':item.code,'reason':reason,
+          'archived_at':str(item.archived_at),'sha256':item.sha256,'policy':'文件保留，仅源门店可查阅，不自动恢复共享。'})
     return item
 
 

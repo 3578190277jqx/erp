@@ -153,7 +153,7 @@ def list_records(request, key):
                'can_adjust': key == 'inventory' and can(request.user, 'inventory', 'adjust', active_org(request)),
                'can_pay': key == 'finance' and can(request.user, 'finance', 'create', active_org(request)),
                'batch_actions': [(a, name) for a, name in [('approve', '批量批准'), ('assign', '批量派工')]
-                                 if can(request.user, module.model.module, a, active_org(request)) and statuses],
+                                 if key!='changes' and can(request.user, module.model.module, a, active_org(request)) and statuses],
                'query_string': request.GET.urlencode(), 'q': request.GET.get('q', ''), 'selected_status': request.GET.get('status', ''),
                'can_import':key in ('customers','materials') and can(request.user,key,'create',active_org(request)),
                'page_size':str(page_size),'page_sizes':['10','15','30','50'],'sort':request.GET.get('sort','-created_at')}
@@ -223,6 +223,11 @@ def detail(request, key, pk):
             context.update({'paid': paid, 'balance': obj.total - paid})
     from .features import feature_context
     context.update(feature_context(request,obj))
+    if isinstance(obj,m.ChangeRequest) and (context.get('change_review',{}).get('error') or context.get('change_review',{}).get('version_changed')):
+        context['actions']=[(a,t) for a,t in context['actions'] if a!='approve']
+        if context.get('change_review',{}).get('error'):
+            for field in context['info']:
+                if field['label']==label(m.ChangeRequest,'proposed_total'):field['value']='待核对：移除失效行后重新计算'
     return render(request, 'erp/detail.html', context)
 
 
@@ -250,7 +255,13 @@ def edit_record(request, key, pk=None):
     obj = record_for(request, module, pk) if pk else None
     if obj and not editable(obj):
         raise PermissionDenied('此单据已冻结，请使用变更或状态操作。')
-    form = document_form(module, request.user, request.POST if request.method == 'POST' else None, obj, active_org(request) or request.GET.get('organization'))
+    bound_order=None
+    if module.model is m.ChangeRequest and not pk and request.GET.get('order'):
+        try:source_id=int(request.GET['order'])
+        except (ValueError,TypeError):raise Http404
+        bound_order=get_object_or_404(scoped(request.user,m.Order,active_org(request)),pk=source_id)
+        if not can(request.user,'changes','create',bound_order.organization_id):raise Http404
+    form = document_form(module, request.user, request.POST if request.method == 'POST' else None, obj, active_org(request) or request.GET.get('organization'),bound_order=bound_order)
     if request.method == 'GET':
         for name in ('customer', 'order'):
             if name in form.fields and request.GET.get(name):
@@ -354,6 +365,7 @@ def lines(request, key, pk):
 @require_POST
 def batch(request, key):
     module = module_for(key)
+    if module.model is m.ChangeRequest:raise PermissionDenied('变更申请须逐单核对原额、拟额与产品后审批。')
     action = request.POST.get('action')
     if action not in ('approve', 'assign'):
         raise PermissionDenied

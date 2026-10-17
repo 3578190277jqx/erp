@@ -46,7 +46,7 @@ def responsible_users(user, module, organization):
     return User.objects.filter(pk__in=ids, is_active=True)
 
 
-def document_form(module, user, data=None, instance=None, active_org=None):
+def document_form(module, user, data=None, instance=None, active_org=None, bound_order=None):
     fields = list(module.fields) + ['owner']
     result_entry = isinstance(instance, m.Measurement) and instance.status == 'in_progress'
     if result_entry:
@@ -61,11 +61,13 @@ def document_form(module, user, data=None, instance=None, active_org=None):
         form.fields['supplier'].required=False
     form.fields['version'] = forms.IntegerField(widget=forms.HiddenInput(), initial=instance.version if instance and instance.pk else 1)
     form.fields['version'].required = bool(instance and instance.pk)
-    org = selected_org(user, module.key if module.key != 'warehouses' else 'inventory', data, instance, active_org)
+    org = bound_order.organization if bound_order else selected_org(user, module.key if module.key != 'warehouses' else 'inventory', data, instance, active_org)
     if 'organization' in form.fields:
         form.fields['organization'].queryset = accessible_organizations(user, module.model.module, 'create')
         form.fields['organization'].initial = org.pk if org else None
         form.fields['organization'].widget.attrs['data-org-select'] = 'true'
+        if bound_order:
+            form.fields['organization'].disabled=True;form.initial['organization']=org.pk
     form.instance.organization = org
     if 'owner' in form.fields:
         form.fields['owner'].queryset = responsible_users(user, module.model.module, org)
@@ -87,7 +89,10 @@ def document_form(module, user, data=None, instance=None, active_org=None):
         form.fields['proposed_total'].required=False
         form.fields['proposed_total'].help_text='留空沿用当前合同额；显式填写0表示申请零金额。填写折扣或增减项时由服务器按全部产品重算。'
         if not (instance and instance.pk):form.initial['proposed_total']=None
-        if not (instance and instance.pk) and data and data.get('order'):
+        if bound_order:
+            form.fields['order'].disabled=True;form.initial['order']=bound_order.pk
+            form.instance.order_version=bound_order.version
+        if not bound_order and not (instance and instance.pk) and data and data.get('order'):
             order = form.fields['order'].queryset.filter(pk=data.get('order')).first()
             if order:
                 form.instance.order_version = order.version

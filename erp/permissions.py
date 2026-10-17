@@ -43,6 +43,7 @@ def role_allows(role, module, action):
     if module == 'followups':
         return role_allows(role,'customers',action)
     if module == 'handoffs':
+        if action=='stop_share':return role in ('boss','manager')
         if action=='withdraw':return role in ('boss','manager','sales','dealer')
         return role in ('boss','manager','sales','dealer','planner','engineer') if action in ('view','export') else role in ('boss','manager','planner')
     if action in ('view', 'export'):

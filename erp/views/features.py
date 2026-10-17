@@ -67,11 +67,15 @@ def feature_context(request,obj):
                      'source_count':len(source),'operation_count':len(change_lines),'restore':obj.restore_product_snapshot,
                      'snapshot_total':source_total,'mismatch':bool(source and source_total!=obj.order.total),
                      'reprices':bool(change_lines or obj.proposed_discount is not None)}
+            summary['proposed_count']=None
             try:summary['proposed_count']=len(pricing.proposed_lines(obj))
-            except ValidationError:summary['error']='原产品已变化，请编辑重新核对后再审批。'
+            except ValidationError as exc:summary['error']='；'.join(exc.messages)
+            delta=summary['delta']
+            summary['delta_display']=f'+¥{delta:,.2f}' if delta>0 else f'−¥{-delta:,.2f}' if delta<0 else '¥0.00'
+            summary['version_changed']=obj.order_version!=obj.order.version
             context['change_review']=summary
             copy=(f"原合同金额 ¥{obj.order.total:,.2f} → 拟合同金额 ¥{obj.proposed_total:,.2f}。"
-                  f"原合同产品 {len(source)} 条，本次操作 {len(change_lines)} 条，拟产品 {summary.get('proposed_count','待核对')} 条。")
+                  f"原合同产品 {len(source)} 条，本次操作 {len(change_lines)} 条，拟产品 {summary['proposed_count'] if summary['proposed_count'] is not None else '待核对'} 条。")
             if summary['reprices']:copy+='本次将按全部拟产品重算合同金额。'
             if summary['mismatch']:copy+='产品快照合计与合同金额不一致，请核对本次改价影响。'
             if summary['restore']:copy+='完整性需人工核对：请确认已补录全部原产品和本次增减项。'
@@ -90,9 +94,11 @@ def feature_context(request,obj):
         context['change_form']=form
         context['can_change_lines']=obj.status=='pending' and scoped(request.user,m.ChangeRequest,action='edit').filter(pk=obj.pk).exists()
     if obj.module in evidence.PARENTS:
-        context['attachments']=evidence.visible_attachments(request.user,obj)
-        for item in context['attachments']:item.can_delete=evidence.can_delete_evidence(request.user,obj,item)
-        context['can_attach']=evidence.can_write_evidence(request.user,obj)
+        context['attachments'],rights,context['evidence_stale']=evidence.attachment_context(request.user,obj)
+        for item in context['attachments']:
+            item.can_delete=evidence.can_delete_evidence(request.user,obj,item,rights)
+            item.can_stop_sharing=evidence.can_stop_sharing(request.user,obj,item,rights)
+        context['can_attach']=rights.write
         context['shared_evidence']=isinstance(obj,m.Handoff)
     context['today_iso']=str(timezone.localdate())
     return context
@@ -133,6 +139,17 @@ def delete_attachment(request,pk):
 
 
 @login_required
+@require_POST
+def stop_sharing(request,pk):
+    item=evidence.authorized_attachment(request.user,pk)
+    try:
+        evidence.stop_sharing_attachment(request.user,item,request.POST.get('version'),request.POST.get('parent_version'),request.POST.get('note',''))
+        messages.success(request,'已停止共享，文件保留归档；已下载的副本无法从对方设备收回。')
+    except BUSINESS_ERRORS as exc:messages.error(request,error_message(exc))
+    return redirect('detail',key=item.object_type,pk=item.object_id)
+
+
+@login_required
 @require_GET
 def payment_plan_choices(request):
     try:pk=int(request.GET.get('order',''))
@@ -168,6 +185,8 @@ def feature_action(request,key,pk,operation):
         elif operation=='receive' and isinstance(obj,m.Purchase):
             quantities={name[4:]:value for name,value in request.POST.items() if name.startswith('qty_') and value.strip() and value!='0'}
             materials.receive_partial(request.user,obj,quantities,request.POST.get('reference',''),version)
+        elif operation=='remove-change-line' and isinstance(obj,m.ChangeRequest):
+            pricing.remove_change_line(request.user,obj,request.POST.get('line_id'),version)
         elif operation=='change-line' and isinstance(obj,m.ChangeRequest):
             form=ChangeLineForm(request.user,obj,request.POST)
             if not form.is_valid():raise ValidationError([str(e) for errors in form.errors.values() for e in errors])

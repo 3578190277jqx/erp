@@ -22,9 +22,10 @@
     document.querySelector('#workflow-form').action = data.url;
     document.querySelector('#workflow-action').value = data.action;
     document.querySelector('#workflow-version').value = data.version;
+    document.querySelector('#workflow-parent-version').value = data.parentVersion || '';
     document.querySelector('#workflow-title').textContent = `确认${data.label}？`;
     document.querySelector('#workflow-copy').textContent = data.confirmCopy || '状态变更将同步到关联单据，并留下操作记录。';
-    const required = ['fail', 'reject', 'cancel', 'close', 'resolve', 'complete', 'withdraw'].includes(data.action);
+    const required = ['fail', 'reject', 'cancel', 'close', 'resolve', 'complete', 'withdraw', 'stop_share'].includes(data.action);
     document.querySelector('#workflow-note').required = required;
     document.querySelector('#workflow-note').value = '';
     document.querySelector('#workflow-required').textContent = required ? ' *' : '（选填）';

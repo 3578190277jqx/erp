@@ -158,3 +158,36 @@ class PostgreSQLBusinessRaces(TransactionTestCase):
         with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(run,['retarget','read']))
         self.assertCountEqual(results,['retargeted','blocked'])
         item.refresh_from_db();self.assertIsNotNone(item.archived_at);self.assertIsNone(item.deleted_at)
+
+    def test_stop_share_between_metadata_and_version_check_denies_receiver(self):
+        from threading import Event
+        from unittest.mock import patch
+        from django.core.exceptions import PermissionDenied
+        from erp.services import collaboration,evidence
+        factory=m.Organization.objects.create(name='停止共享工厂',kind='factory')
+        receiver=User.objects.create_user('revoked-reader')
+        m.Membership.objects.create(user=receiver,organization=factory,role='planner',scope='org')
+        m.OrderLine.objects.create(order=self.order,name='柜体',quantity=1,unit_price=1000,line_total=1000)
+        handoff=collaboration.send_handoff(self.actor,self.order,factory,self.order.version)
+        item=m.Attachment.objects.create(**self.common,object_type='handoffs',object_id=handoff.pk,
+               file='private/synthetic-revoke.pdf',original_name='共享图纸.pdf',size=1,sha256='b'*64)
+        metadata_read=Event();revoked=Event();same_version=evidence._same_version
+        def interleave(parent):
+            metadata_read.set()
+            if not revoked.wait(10):raise AssertionError('stop-share did not finish')
+            return same_version(parent)
+        def run(which):
+            close_old_connections()
+            try:
+                if which=='write':
+                    if not metadata_read.wait(10):raise AssertionError('reader did not reach version check')
+                    evidence.stop_sharing_attachment(User.objects.get(pk=self.actor.pk),m.Attachment.objects.get(pk=item.pk),1,handoff.version,'误传')
+                    revoked.set();return 'stopped'
+                try:evidence.authorized_attachment(User.objects.get(pk=receiver.pk),item.pk)
+                except PermissionDenied:return 'blocked'
+                return 'disclosed'
+            finally:connections.close_all()
+        with patch('erp.services.evidence._same_version',side_effect=interleave):
+            with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(run,['read','write']))
+        self.assertCountEqual(results,['blocked','stopped'])
+        item.refresh_from_db();self.assertIsNotNone(item.archived_at)

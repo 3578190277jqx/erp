@@ -102,7 +102,7 @@ def prerequisites(user, obj, action, note):
         if order.source_handoff_id:
             raise ValidationError('工厂订单来自冻结的交接快照，不能单边修改产品与合同。')
         if order.version != obj.order_version:
-            raise ValidationError('订单版本已变化，请重新申请变更。')
+            raise ValidationError('订单版本已变化，请移除失效行并编辑重新核对后再审批。')
         if order.status not in ('confirmed', 'producing', 'ready', 'shipping', 'installing'):
             raise ValidationError('当前订单状态不允许变更。')
         received = sum((p.amount for p in order.payment_set.all()), 0)

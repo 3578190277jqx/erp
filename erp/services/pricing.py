@@ -95,9 +95,12 @@ def proposed_lines(change):
              for line in change.order.lines.all()}
     if change.proposed_discount is not None:
         for current in change.order.lines.all():lines[current.pk]['line_total']=line_net(current,change.proposed_discount)
+    source_ids=set(lines)
     for line in (change.lines.all() if change.pk else []):
         if line.operation in ('update','remove') and line.order_line_id not in lines:
-            raise ValidationError('原订单产品不存在或被重复修改。')
+            if line.order_line_id not in source_ids:
+                raise ValidationError('原产品已被删除，请移除对应变更行。',code='missing_source_line')
+            raise ValidationError('同一原产品被重复修改，请移除重复变更行。',code='duplicate_source_line')
         if line.operation in ('update','remove'):
             del lines[line.order_line_id]
         if line.operation != 'remove':
@@ -138,6 +141,29 @@ def add_change_line(user, change, values, version):
     prepare_change(change)
     save_version(change,version)
     audit(user,change,'add_change_line',before)
+    return change
+
+
+@transaction.atomic
+def remove_change_line(user,change,line_id,version):
+    parent=m.Order.objects.select_for_update().get(pk=change.order_id)
+    change=lock(user,change,'edit',version);change.order=parent
+    if change.status!='pending':raise ValidationError('仅待审批申请可移除变更行。')
+    try:line_id=int(line_id)
+    except (ValueError,TypeError):raise ValidationError('请选择有效的申请行。')
+    line=change.lines.select_for_update().filter(pk=line_id).first()
+    if not line:raise ValidationError('此行不属于当前申请或已移除。')
+    before={'change':snapshot(change),'line':snapshot(line)}
+    line.delete();recalculation_error=''
+    try:prepare_change(change,submitted_total=None)
+    except ValidationError as exc:
+        # Removing one stale line must not roll back just because another stale
+        # target remains. Keep the previous proposal explicitly unreviewed;
+        # approval still verifies every remaining line and the order version.
+        if getattr(exc,'code',None) not in ('missing_source_line','duplicate_source_line'):raise
+        recalculation_error='；'.join(exc.messages)
+    save_version(change,change.version)
+    audit(user,change,'remove_change_line',before,after={'change':snapshot(change),'recalculation_error':recalculation_error})
     return change
 
 

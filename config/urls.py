@@ -29,6 +29,7 @@ urlpatterns = [
     path('features/<slug:key>/<int:pk>/<slug:operation>/',f.feature_action,name='feature_action'),
     path('attachments/<slug:key>/<int:pk>/upload/',f.upload,name='upload'),
     path('attachments/<int:pk>/download/',f.download,name='download'),
+    path('attachments/<int:pk>/stop-sharing/',f.stop_sharing,name='stop_sharing'),
     path('attachments/<int:pk>/delete/',f.delete_attachment,name='delete_attachment'),
     path('imports/<slug:key>/',f.import_csv,name='import_csv'),
 ]

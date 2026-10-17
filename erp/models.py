@@ -504,7 +504,7 @@ class Attachment(Record):
     sha256 = models.CharField('SHA256',max_length=64)
     deleted_at = models.DateTimeField('删除时间',null=True,blank=True,editable=False)
     purged_at = models.DateTimeField('文件清理时间',null=True,blank=True,editable=False)
-    archived_at = models.DateTimeField('交接改派归档时间',null=True,blank=True,editable=False)
+    archived_at = models.DateTimeField('交接附件归档时间',null=True,blank=True,editable=False)
 
 
 class Handoff(Record):
