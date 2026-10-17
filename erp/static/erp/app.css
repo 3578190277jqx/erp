@@ -34,3 +34,5 @@
 .list-panel+section.panel{margin-top:24px}
 
 .attachment-row{display:flex;gap:12px;align-items:center;border-bottom:1px solid var(--line)}.attachment-row>a{display:flex;gap:14px;align-items:center;padding:15px 0;min-width:0;flex:1}.attachment-row>a>div{flex:1;min-width:0;overflow-wrap:anywhere}.attachment-row button{min-height:44px}
+
+.feature-form>.shared-confirm{display:flex;align-items:flex-start;gap:12px;line-height:1.7}.shared-confirm input[type=checkbox]{flex:0 0 18px;width:18px;height:18px;margin-top:2px}

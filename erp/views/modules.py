@@ -101,6 +101,7 @@ def display_value(obj, field):
     if field == 'action':
         from erp.templatetags.ui import action_name
         return action_name(value)
+    if isinstance(value,bool):return '是' if value else '否'
     if isinstance(value, Decimal):
         return f'¥{value:,.2f}' if field in ('total', 'amount', 'unit_price', 'unit_cost', 'proposed_total') else f'{value:,.3f}'.rstrip('0').rstrip('.')
     if hasattr(value, 'strftime'):

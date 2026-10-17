@@ -39,6 +39,13 @@ class RecoveryTests(ERPTestCase):
         self.assertEqual(sent.status,'sent')
         with self.assertRaises(ValidationError):services.transition(self.sales,sent,'withdraw',1,'旧版本')
 
+    def test_target_can_reject_after_route_disabled_but_cannot_accept(self):
+        order,handoff=self.sent();self.route.enabled=False;self.route.save()
+        with self.assertRaises(PermissionDenied):collaboration.accept_handoff(self.planner,handoff,handoff.version)
+        services.transition(self.planner,handoff,'reject',handoff.version,'协作授权停用')
+        handoff.refresh_from_db();self.assertEqual(handoff.status,'rejected')
+        self.assertFalse(m.Order.objects.filter(source_handoff=handoff).exists())
+
     def test_factory_cannot_withdraw_source_order_or_accept_after_withdrawal(self):
         order,handoff=self.sent()
         with self.assertRaises(PermissionDenied):services.transition(self.planner,handoff,'withdraw',handoff.version,'越权')
