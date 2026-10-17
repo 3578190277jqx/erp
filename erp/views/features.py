@@ -90,7 +90,7 @@ def feature_context(request,obj):
         context['change_form']=form
         context['can_change_lines']=obj.status=='pending' and scoped(request.user,m.ChangeRequest,action='edit').filter(pk=obj.pk).exists()
     if obj.module in evidence.PARENTS:
-        context['attachments']=list(m.Attachment.objects.filter(organization=obj.organization,object_type=obj.module,object_id=obj.pk,deleted_at__isnull=True).select_related('owner'))
+        context['attachments']=evidence.visible_attachments(request.user,obj)
         for item in context['attachments']:item.can_delete=evidence.can_delete_evidence(request.user,obj,item)
         context['can_attach']=evidence.can_write_evidence(request.user,obj)
         context['shared_evidence']=isinstance(obj,m.Handoff)

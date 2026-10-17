@@ -38,7 +38,12 @@ def can_write_evidence(user,parent):
     return scoped(user,type(parent),action='edit').filter(pk=parent.pk).exists()
 
 
+def can_view_archived_evidence(user,parent):
+    return isinstance(parent,m.Handoff) and scoped(user,m.Order).filter(pk=parent.order_id).exists()
+
+
 def can_delete_evidence(user,parent,item):
+    if item.archived_at and not can_view_archived_evidence(user,parent):return False
     if isinstance(parent,m.Handoff) and item.owner_id!=user.pk and not user.is_superuser:return False
     return can_write_evidence(user,parent)
 
@@ -88,14 +93,34 @@ def upload_attachment(user,parent,file,kind,share_confirmed=False,parent_version
     return item
 
 
+@transaction.atomic
+def visible_attachments(user,parent):
+    if isinstance(parent,m.Handoff):
+        # The parent lock makes the current sharing target and archive flags a
+        # consistent read even when a detail request races a reassignment.
+        parent=m.Handoff.objects.select_for_update().get(pk=parent.pk)
+        if not scoped(user,m.Handoff).filter(pk=parent.pk).exists():return []
+    files=m.Attachment.objects.filter(organization=parent.organization,object_type=parent.module,
+              object_id=parent.pk,deleted_at__isnull=True).select_related('owner')
+    if not can_view_archived_evidence(user,parent):files=files.filter(archived_at__isnull=True)
+    return list(files)
+
+
+@transaction.atomic
 def authorized_attachment(user,pk):
     try:
-        item = m.Attachment.objects.get(pk=pk,deleted_at__isnull=True)
-        parent_model = PARENTS[item.object_type]
+        identity=m.Attachment.objects.get(pk=pk,deleted_at__isnull=True)
+        parent_model=PARENTS[identity.object_type]
+        parent=parent_model.objects.select_for_update().get(pk=identity.object_id)
+        # Re-read metadata after locking the parent; retarget/delete lock the
+        # same parent first, so a receiver cannot see a new target with old flags.
+        item=m.Attachment.objects.get(pk=pk,deleted_at__isnull=True)
     except (m.Attachment.DoesNotExist,KeyError):
         raise PermissionDenied('附件不可用。')
-    if not scoped(user,parent_model).filter(pk=item.object_id,organization_id=item.organization_id).exists():
+    if not scoped(user,parent_model).filter(pk=parent.pk,organization_id=item.organization_id).exists():
         raise PermissionDenied('附件不在当前授权范围。')
+    if item.archived_at and not can_view_archived_evidence(user,parent):
+        raise PermissionDenied('旧交接归档仅源门店可查阅。')
     return item
 
 

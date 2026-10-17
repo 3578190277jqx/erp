@@ -58,6 +58,19 @@ class ChangeIntentTests(ERPTestCase):
         services.transition(self.manager,change,'approve',change.version)
         order.refresh_from_db();self.assertEqual(order.total,0)
 
+    def test_initial_target_amount_can_be_saved_then_derived_from_added_lines(self):
+        order=self.order(status='confirmed')
+        m.OrderLine.objects.create(order=order,name='柜体',quantity=1,unit_price=1000,line_total=1000)
+        self.client.force_login(self.admin)
+        response=self.client.post('/modules/changes/new/',self.payload(order,proposed_total='1200'))
+        self.assertEqual(response.status_code,302)
+        change=m.ChangeRequest.objects.get(order=order)
+        with self.assertRaises(ValidationError):services.transition(self.manager,change,'approve',change.version)
+        services.add_change_line(self.admin,change,dict(operation='add',name='安装',quantity=1,unit_price=200,discountable=False),change.version)
+        change.refresh_from_db();self.assertEqual(change.proposed_total,1200)
+        services.transition(self.manager,change,'approve',change.version)
+        order.refresh_from_db();self.assertEqual(order.total,1200)
+
     def test_derived_amount_is_verified_not_silently_corrected_during_approval(self):
         order=self.order(status='confirmed')
         m.OrderLine.objects.create(order=order,name='衣柜',quantity=1,unit_price=1000,line_total=1000)
@@ -165,3 +178,28 @@ class CollaborationOwnershipTests(ERPTestCase):
         local=collaboration.accept_handoff(self.receiver,self.handoff,self.handoff.version)
         self.assertEqual(local.kind,'manufacturing');self.assertEqual(local.total,0)
         self.assertTrue(local.discount_confirmed)
+
+    def test_retarget_archives_factory_evidence_without_cross_delete_or_disclosure(self):
+        from tempfile import TemporaryDirectory
+        from django.test import override_settings
+        from erp.services import evidence,collaboration
+        factory2=m.Organization.objects.create(name='新接单工厂',kind='factory')
+        m.CollaborationRoute.objects.create(source=self.org,target=factory2)
+        m.Membership.objects.create(user=self.receiver,organization=factory2,role='planner',scope='org')
+        with TemporaryDirectory() as folder,override_settings(MEDIA_ROOT=folder):
+            item=self.upload(self.receiver,'旧厂专用图纸.pdf')
+            services.transition(self.sales,self.handoff,'withdraw',self.handoff.version,'客户改派')
+            self.handoff.refresh_from_db();self.source.refresh_from_db()
+            collaboration.send_handoff(self.sales,self.source,factory2,self.source.version,handoff_version=self.handoff.version)
+            item.refresh_from_db()
+            self.assertIsNotNone(item.archived_at);self.assertIsNone(item.deleted_at)
+            self.assertTrue(item.file.storage.exists(item.file.name))
+            with self.assertRaises(PermissionDenied):evidence.authorized_attachment(self.receiver,item.pk)
+            with self.assertRaises(PermissionDenied):evidence.delete_attachment(self.receiver,item,item.version)
+            self.assertEqual(evidence.authorized_attachment(self.sales,item.pk).pk,item.pk)
+            self.assertTrue(m.AuditEvent.objects.filter(action='archive_handoff_evidence').exists())
+            self.client.force_login(self.receiver)
+            self.assertNotContains(self.client.get(f'/modules/handoffs/{self.handoff.pk}/'),'旧厂专用图纸.pdf')
+            self.client.force_login(self.sales)
+            response=self.client.get(f'/modules/handoffs/{self.handoff.pk}/')
+            self.assertContains(response,'旧厂专用图纸.pdf');self.assertContains(response,'已归档')

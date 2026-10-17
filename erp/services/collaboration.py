@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError, PermissionDenied
 from django.db import transaction
+from django.utils import timezone
 from erp import models as m
 from erp.permissions import can,scoped,require_access
 from .common import lock, save_version, audit, snapshot, system_update
@@ -30,8 +31,16 @@ def send_handoff(user,order,target,version,note='',handoff_version=None):
         except (TypeError,ValueError):raise ValidationError('重发需有效的交接版本，请刷新。')
         if existing.status not in ('rejected','withdrawn') or existing.version!=expected:
             raise ValidationError('只有已拒单或已撤回的交接可重发，请刷新。')
-    if existing and existing.target_organization_id!=target.pk and m.Attachment.objects.filter(object_type='handoffs',object_id=existing.pk,deleted_at__isnull=True).exists():
-        raise ValidationError('改派工厂前请先移除旧交接附件，并核对新工厂可共享的文件。')
+    if existing and existing.target_organization_id!=target.pk:
+        files=list(m.Attachment.objects.select_for_update().filter(object_type='handoffs',object_id=existing.pk,
+                   organization=order.organization,deleted_at__isnull=True,archived_at__isnull=True))
+        if files:
+            before={'target':existing.target_organization_id,'attachments':[snapshot(item) for item in files]}
+            for item in files:
+                item.archived_at=timezone.now();save_version(item,item.version)
+            audit(user,existing,'archive_handoff_evidence',before,
+                  after={'target':target.pk,'attachments':[snapshot(item) for item in files],
+                         'policy':'保留旧工厂证据，仅源门店可查阅，不向新工厂共享。'})
     payload = {'title':order.title,'source_code':order.code,'source_version':order.version,
                'due_date':str(order.due_date or ''),
                'lines':[{field:str(getattr(line,field)) for field in PRODUCTION_FIELDS} for line in order.lines.filter(category='product')]}

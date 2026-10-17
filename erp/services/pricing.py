@@ -76,7 +76,7 @@ def prepare_change(change, *, submitted_total=UNSET, verify=False, persist_lines
     if derived or total!=order.total:validate_pricing_basis(change)
     if has_changes and not has_products and order.total>0 and not change.restore_product_snapshot:
         raise ValidationError('原合同缺少产品快照，请明确完整补录全部产品，不能只填写新增费用。')
-    if has_products and not derived and total!=order.total:
+    if verify and has_products and not derived and total!=order.total:
         raise ValidationError('有产品明细的订单必须通过增减项计算变更金额。')
     if verify:
         if change.proposed_total!=total:

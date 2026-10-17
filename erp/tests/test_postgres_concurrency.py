@@ -128,3 +128,33 @@ class PostgreSQLBusinessRaces(TransactionTestCase):
         paid=sum(m.Payment.objects.values_list('amount',flat=True))
         self.assertLessEqual(paid,self.order.total)
         self.assertEqual(sum(self.order.payment_plans.values_list('amount',flat=True)),self.order.total)
+
+    def test_retarget_and_receiver_authorization_cannot_disclose_archived_file(self):
+        from erp.services import collaboration,evidence
+        from django.core.exceptions import PermissionDenied
+        factory1=m.Organization.objects.create(name='旧目标',kind='factory')
+        factory2=m.Organization.objects.create(name='新目标',kind='factory')
+        receiver=User.objects.create_user('new-factory-only')
+        m.Membership.objects.create(user=receiver,organization=factory2,role='planner',scope='org')
+        m.OrderLine.objects.create(order=self.order,name='柜体',quantity=1,unit_price=1000,line_total=1000)
+        handoff=collaboration.send_handoff(self.actor,self.order,factory1,self.order.version)
+        item=m.Attachment.objects.create(**self.common,object_type='handoffs',object_id=handoff.pk,
+              file='private/synthetic-no-file.pdf',original_name='旧厂图纸.pdf',kind='drawing',size=1,sha256='a'*64)
+        services.transition(self.actor,handoff,'withdraw',handoff.version,'改派')
+        handoff.refresh_from_db();self.order.refresh_from_db()
+        barrier=Barrier(2)
+        def run(which):
+            close_old_connections()
+            try:
+                barrier.wait(timeout=10)
+                if which=='retarget':
+                    collaboration.send_handoff(User.objects.get(pk=self.actor.pk),m.Order.objects.get(pk=self.order.pk),factory2,
+                                               self.order.version,handoff_version=handoff.version)
+                    return 'retargeted'
+                try:evidence.authorized_attachment(User.objects.get(pk=receiver.pk),item.pk)
+                except PermissionDenied:return 'blocked'
+                return 'disclosed'
+            finally:connections.close_all()
+        with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(run,['retarget','read']))
+        self.assertCountEqual(results,['retargeted','blocked'])
+        item.refresh_from_db();self.assertIsNotNone(item.archived_at);self.assertIsNone(item.deleted_at)

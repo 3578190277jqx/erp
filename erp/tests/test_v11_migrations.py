@@ -6,7 +6,7 @@ from django.test import TransactionTestCase
 
 
 class HistoricalUpgradeTests(TransactionTestCase):
-    latest=('erp','0015_backfill_contract_basis')
+    latest=('erp','0016_archive_reassigned_handoff_evidence')
 
     def tearDown(self):
         MigrationExecutor(connection).migrate([self.latest])
@@ -74,3 +74,22 @@ class HistoricalUpgradeTests(TransactionTestCase):
         self.assertFalse(m.Order.objects.filter(kind='sale',discount_confirmed=True).exists())
         self.assertFalse(m.Order.objects.filter(kind='manufacturing',discount_confirmed=False).exists())
         self.assertTrue(m.AuditEvent.objects.filter(action='upgrade_change_review').exists())
+
+    def test_v112_archive_upgrade_preserves_old_file_and_sharing_metadata(self):
+        executor=MigrationExecutor(connection);old=('erp','0015_backfill_contract_basis');executor.migrate([old])
+        apps=executor.loader.project_state([old]).apps
+        user=apps.get_model('auth','User').objects.create(username='archive-history',password='!')
+        Org=apps.get_model('erp','Organization');source=Org.objects.create(name='旧门店');factory=Org.objects.create(name='旧工厂',kind='factory')
+        common={'organization_id':source.pk,'owner_id':user.pk}
+        customer=apps.get_model('erp','Customer').objects.create(**common,code='ARC-C',name='客户',phone='内部')
+        order=apps.get_model('erp','Order').objects.create(**common,code='ARC-O',customer=customer,title='旧合同',total=1000)
+        handoff=apps.get_model('erp','Handoff').objects.create(**common,code='ARC-H',order=order,target_organization=factory,payload={})
+        item=apps.get_model('erp','Attachment').objects.create(**common,code='ARC-F',object_type='handoffs',object_id=handoff.pk,
+                file='private/historical.pdf',original_name='历史图纸.pdf',size=12,sha256='a'*64)
+        MigrationExecutor(connection).migrate([self.latest])
+        from erp import models as m
+        fresh=m.Attachment.objects.get(pk=item.pk)
+        self.assertEqual(fresh.file.name,'private/historical.pdf');self.assertEqual(fresh.version,1)
+        self.assertIsNone(fresh.archived_at);self.assertIsNone(fresh.deleted_at)
+        self.assertEqual(m.Order.objects.get(pk=order.pk).total,1000)
+        self.assertEqual(m.Handoff.objects.get(pk=handoff.pk).target_organization_id,factory.pk)
