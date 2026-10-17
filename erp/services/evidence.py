@@ -7,12 +7,14 @@ from django.core.files.base import File
 from django.db import transaction
 from django.utils import timezone
 from erp import models as m
-from erp.permissions import scoped, require_access
+from erp.permissions import scoped, require_access, can
 from .common import audit,save_version,snapshot
 
 MAX_BYTES = 20 * 1024 * 1024
 PARENTS = {'customers':m.Customer,'measurements':m.Measurement,'designs':m.Design,'quotes':m.Quote,
-           'orders':m.Order,'breakdowns':m.Breakdown,'deliveries':m.Delivery,'installations':m.Installation,'aftersales':m.AfterSales}
+           'orders':m.Order,'breakdowns':m.Breakdown,'deliveries':m.Delivery,'installations':m.Installation,'aftersales':m.AfterSales,
+           'purchases':m.Purchase,'production':m.Production,'changes':m.ChangeRequest,
+           'handoffs':m.Handoff,'receipts':m.PurchaseReceipt}
 
 
 def valid_signature(extension, content):
@@ -25,10 +27,27 @@ def valid_signature(extension, content):
     }.get(extension,False)
 
 
-def upload_attachment(user,parent,file,kind):
+def can_write_evidence(user,parent):
+    if not scoped(user,type(parent)).filter(pk=parent.pk).exists():return False
+    if isinstance(parent,m.Handoff):
+        return (scoped(user,m.Order,action='edit').filter(pk=parent.order_id).exists() or
+                parent.status in ('sent','accepted','completed') and can(user,'handoffs','accept',parent.target_organization_id))
+    if isinstance(parent,m.PurchaseReceipt):
+        return scoped(user,m.Purchase,action='receive').filter(pk=parent.purchase_id).exists()
+    if isinstance(parent,m.Production) and scoped(user,m.Production,action='issue').filter(pk=parent.pk).exists():return True
+    return scoped(user,type(parent),action='edit').filter(pk=parent.pk).exists()
+
+
+def require_evidence_write(user,parent):
+    if not can_write_evidence(user,parent):raise PermissionDenied('没有此单据的附件维护权限。')
+
+
+def upload_attachment(user,parent,file,kind,share_confirmed=False,parent_version=None,target_id=None):
     if parent.module not in PARENTS:
         raise ValidationError('当前模块不支持附件。')
-    require_access(user,parent,'edit')
+    require_evidence_write(user,parent)
+    if isinstance(parent,m.Handoff) and (not share_confirmed or kind not in ('drawing','photo')):
+        raise ValidationError('交接附件须明确确认已脱敏，仅分享生产图纸或现场照片；禁止上传合同凭证。')
     if file.size > MAX_BYTES or not file.size:
         raise ValidationError('文件必须为 1 字节至 20MB。')
     prefix=file.read(1024)
@@ -47,7 +66,12 @@ def upload_attachment(user,parent,file,kind):
     try:
         with transaction.atomic():
             parent = type(parent).objects.select_for_update().get(pk=parent.pk)
-            require_access(user,parent,'edit')
+            require_evidence_write(user,parent)
+            if isinstance(parent,m.Handoff):
+                try:expected_version,expected_target=int(parent_version),int(target_id)
+                except (ValueError,TypeError):raise ValidationError('交接附件缺少有效版本与目标工厂，请刷新后重试。')
+                if parent.version!=expected_version or parent.target_organization_id!=expected_target:
+                    raise ValidationError('交接版本或目标工厂已变化，请重新核对共享范围后上传。')
             item.file.save(name,File(file,name=name),save=False)
             item.full_clean(exclude=['code'])
             item.save()
@@ -87,7 +111,7 @@ def delete_attachment(user,item,version):
     parent_model=PARENTS.get(item.object_type)
     if not parent_model:raise PermissionDenied('附件不可用。')
     parent=parent_model.objects.select_for_update().get(pk=item.object_id)
-    require_access(user,parent,'edit')
+    require_evidence_write(user,parent)
     item=m.Attachment.objects.select_for_update().get(pk=item.pk)
     if item.organization_id!=parent.organization_id:raise PermissionDenied('附件组织不匹配。')
     try:expected=int(version)

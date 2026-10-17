@@ -56,7 +56,7 @@ register('aftersales', m.AfterSales, '售后工单', '售后工单', '每一份�
 register('finance', m.Payment, '财务对账', '收付款', '资金往来清楚，经营心中有数。', 'wallet', '经营与设置',
          'code direction order purchase plan amount reference paid_date', '', False)
 register('changes', m.ChangeRequest, '变更审批', '变更申请', '变化被看见，决定可追溯。', 'check', '经营与设置',
-         'code order proposed_total proposed_due_date status owner', 'order proposed_total proposed_due_date note')
+         'code order proposed_total proposed_due_date status owner', 'order proposed_total proposed_due_date proposed_discount revise_payment_plan restore_product_snapshot note')
 register('audit', m.AuditEvent, '操作日志', '审计事件', '谁，在什么时候，做了什么。', 'activity', '经营与设置',
          'code object_type action owner created_at', '', False)
 

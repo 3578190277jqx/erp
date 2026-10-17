@@ -53,7 +53,7 @@ class PostgreSQLBusinessRaces(TransactionTestCase):
         self.org=m.Organization.objects.create(name='竞争门店')
         self.common={'organization':self.org,'owner':self.actor}
         self.customer=m.Customer.objects.create(**self.common,name='测试客户',phone='内部')
-        self.order=m.Order.objects.create(**self.common,customer=self.customer,title='测试订单',status='confirmed',total=1000)
+        self.order=m.Order.objects.create(**self.common,customer=self.customer,title='测试订单',status='confirmed',total=1000,discount_confirmed=True)
 
     def race(self,calls):
         barrier=Barrier(len(calls))
@@ -99,3 +99,32 @@ class PostgreSQLBusinessRaces(TransactionTestCase):
         self.race([approve(user.pk) for user in approvers])
         self.order.refresh_from_db();self.assertEqual(self.order.total,1100)
         self.assertEqual(m.AuditEvent.objects.filter(object_type='changes',object_id=change.pk,action='approve').count(),1)
+
+    def test_accept_and_withdraw_handoff_cannot_both_commit(self):
+        from erp.services import collaboration
+        factory=m.Organization.objects.create(name='竞争工厂',kind='factory')
+        m.OrderLine.objects.create(order=self.order,name='柜体',quantity=1,unit_price=1000,line_total=1000)
+        handoff=collaboration.send_handoff(self.actor,self.order,factory,self.order.version)
+        def accept():collaboration.accept_handoff(User.objects.get(pk=self.actor.pk),m.Handoff.objects.get(pk=handoff.pk),1)
+        def withdraw():services.transition(User.objects.get(pk=self.actor.pk),m.Handoff.objects.get(pk=handoff.pk),'withdraw',1,'客户暂缓')
+        self.race([accept,withdraw])
+        handoff.refresh_from_db()
+        self.assertEqual(m.Order.objects.filter(source_handoff=handoff).count(),int(handoff.status=='accepted'))
+        self.assertIn(handoff.status,['accepted','withdrawn'])
+
+    def test_payment_and_lower_contract_revision_cannot_both_commit(self):
+        from datetime import date
+        from erp.services import receivables
+        approver=User.objects.create_superuser('revision-approver',password='test-only')
+        receivables.create_plan(self.actor,self.order,self.order.version,date(2026,10,16),[30,40,30])
+        self.order.refresh_from_db()
+        change=m.ChangeRequest.objects.create(**self.common,order=self.order,order_version=self.order.version,
+                    proposed_total=600,proposed_due_date=date(2026,12,1),revise_payment_plan=True,note='减项')
+        def approve():services.transition(User.objects.get(pk=approver.pk),m.ChangeRequest.objects.get(pk=change.pk),'approve',1)
+        def pay():services.record_payment(User.objects.get(pk=self.actor.pk),m.Order.objects.get(pk=self.order.pk),700,
+                                          'RACE-REVISION',date(2026,10,16),'银行','')
+        self.race([approve,pay])
+        self.order.refresh_from_db()
+        paid=sum(m.Payment.objects.values_list('amount',flat=True))
+        self.assertLessEqual(paid,self.order.total)
+        self.assertEqual(sum(self.order.payment_plans.values_list('amount',flat=True)),self.order.total)

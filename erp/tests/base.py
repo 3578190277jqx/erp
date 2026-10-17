@@ -25,5 +25,6 @@ class ERPTestCase(TestCase):
         return model.objects.create(organization=self.org, owner=owner, **kwargs)
 
     def order(self, **kwargs):
+        kwargs.setdefault('discount_confirmed',True)
         return self.make(m.Order, customer=self.customer, title='全屋定制', total=1000,
                          contract_number='HT-2026-001', due_date=date(2026, 11, 15), **kwargs)

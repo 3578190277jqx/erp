@@ -236,6 +236,9 @@ def validate_creation(obj):
         if obj.order.source_handoff_id:
             raise ValidationError('工厂生产订单的交接快照不可通过本地变更修订。')
         obj.order_version = obj.order.version
+        if obj.proposed_discount is not None:
+            from erp.services.pricing import change_total
+            obj.proposed_total=change_total(obj)
 
 
 @login_required
@@ -265,6 +268,9 @@ def edit_record(request, key, pk=None):
                         # Use the same parent -> job lock order as reserve/issue.
                         production_order=m.Production.objects.get(pk=obj.pk).breakdown.order_id
                         m.Order.objects.select_for_update().get(pk=production_order)
+                    if isinstance(obj,m.ChangeRequest):
+                        parent_id=m.ChangeRequest.objects.values_list('order_id',flat=True).get(pk=obj.pk)
+                        parent=m.Order.objects.select_for_update().get(pk=parent_id)
                     fresh = lock(request.user, obj, 'edit', form.cleaned_data['version'])
                     before = snapshot(fresh)
                     if not editable(fresh):
@@ -278,11 +284,18 @@ def edit_record(request, key, pk=None):
                     if isinstance(candidate, m.Quote):
                         from erp.services.pricing import quote_amounts
                         candidate.total = quote_amounts(candidate)['total']
+                    if isinstance(candidate,m.ChangeRequest):
+                        candidate.order=parent;candidate.order_version=parent.version
+                        if candidate.proposed_discount is not None or candidate.lines.exists():
+                            from erp.services.pricing import refresh_change_pricing
+                            refresh_change_pricing(candidate)
                     save_version(candidate, fresh.version)
                     audit(request.user, candidate, 'edit', before)
                 else:
                     candidate = form.save(commit=False)
                     if isinstance(candidate,m.Purchase) and candidate.supplier_record_id:candidate.supplier=candidate.supplier_record.name
+                    if isinstance(candidate,m.ChangeRequest):
+                        candidate.order=m.Order.objects.select_for_update().get(pk=candidate.order_id)
                     validate_creation(candidate)
                     if isinstance(candidate, m.ChangeRequest):
                         candidate.requested_by = request.user

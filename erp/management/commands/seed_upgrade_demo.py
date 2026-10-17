@@ -18,17 +18,25 @@ class Command(BaseCommand):
         if not settings.DEBUG:raise CommandError('仅可用于本地演示环境。')
         seed=m.AuditEvent.objects.filter(action='demo_seed').first()
         if not seed:raise CommandError('请先运行 seed_demo。')
-        store=m.Organization.objects.filter(kind='store',name__contains='杭州').first()
+        store=m.Organization.objects.filter(pk=seed.organization_id,kind='store').first()
+        if not store:raise CommandError('演示源门店缺失或类型已改变，请先恢复 seed_demo 门店。')
         factory=m.Organization.objects.filter(kind='factory').first()
+        if not factory:raise CommandError('演示工厂缺失，请先恢复工厂组织后重试。')
         m.CollaborationRoute.objects.get_or_create(source=store,target=factory)
         if m.AuditEvent.objects.filter(action='demo_upgrade_v11').exists():
             self.stdout.write('v1.1 演示已存在，保留全部数据。');return
-        admin=User.objects.get(username='demo_admin')
-        store=m.Organization.objects.filter(kind='store',name__contains='杭州').first()
-        factory=m.Organization.objects.filter(kind='factory').first()
+        required=('demo_admin','demo_planner','demo_engineer','demo_warehouse')
+        users={user.username:user for user in User.objects.filter(username__in=required)}
+        missing=set(required)-users.keys()
+        if missing:raise CommandError('缺少演示账号：'+', '.join(sorted(missing))+'，请先恢复 seed_demo 资料。')
+        admin=users['demo_admin']
+        customer=m.Customer.objects.filter(organization=store,is_internal=False).first()
+        warehouse=m.Warehouse.objects.filter(organization=store).first()
+        material=m.Material.objects.filter(organization=store).first()
+        if not all((customer,warehouse,material)):
+            raise CommandError('演示门店缺少客户、仓库或物料，请先恢复 seed_demo 资料。')
         for role in ('planner','engineer','warehouse'):
-            m.Membership.objects.get_or_create(user=User.objects.get(username=f'demo_{role}'),organization=factory,role=role,defaults={'scope':'org'})
-        customer=m.Customer.objects.filter(organization=store).first()
+            m.Membership.objects.get_or_create(user=users[f'demo_{role}'],organization=factory,role=role,defaults={'scope':'org'})
         quote=m.Quote.objects.create(organization=store,owner=admin,customer=customer,title='白橡 · 全屋定制升级示例',discount=Decimal('.95'),tax_rate=Decimal('.13'))
         for values in [dict(name='主卧通顶衣柜',room='主卧',specification='白橡木色 / 哑光门板 / 含基础五金',pricing_mode='projected',width_mm=3200,height_mm=2600,quantity=1,unit='㎡',unit_price=1380,unit_cost=760),
                        dict(name='玄关收纳柜',room='玄关',specification='悬空柜体 / 暖光灯带',pricing_mode='projected',width_mm=1800,height_mm=2400,quantity=1,unit='㎡',unit_price=1580,unit_cost=880),
@@ -43,8 +51,6 @@ class Command(BaseCommand):
         handoff=collaboration.send_handoff(admin,order,factory,order.version,'示例：门店冻结规格后，工厂可在“门厂交接”接单。')
         m.FollowUp.objects.create(organization=store,owner=admin,customer=customer,channel='到店',next_date=timezone.localdate()+timedelta(days=3),note='已确认白橡门板与五金，等待定金到账后安排工厂生产。')
         supplier=m.Supplier.objects.create(organization=store,owner=admin,name='浙木板材（示例）',contact='许经理',phone='演示号码',payment_days=30)
-        warehouse=m.Warehouse.objects.filter(organization=store).first()
-        material=m.Material.objects.filter(organization=store).first()
         purchase=m.Purchase.objects.create(organization=store,owner=admin,supplier=supplier.name,supplier_record=supplier,warehouse=warehouse,due_date=timezone.localdate()+timedelta(days=7))
         services.add_line(admin,purchase,dict(material=material,quantity=100,unit_price=80),purchase.version);purchase.refresh_from_db()
         for action in ('submit','approve','order'):

@@ -33,6 +33,7 @@ def feature_context(request,obj):
         context['amounts']=amounts
         context['show_costs']=can(request.user,'finance','view',obj.organization_id)
     if isinstance(obj,m.Order):
+        context['pricing_unknown']=obj.kind=='sale' and not obj.discount_confirmed
         context['plans']=receivables.plan_rows(obj)
         context['can_plan']=obj.kind=='sale' and obj.status=='confirmed' and not context['plans'] and (
             can(request.user,'finance','create',obj.organization_id) or can(request.user,'changes','approve',obj.organization_id))
@@ -56,8 +57,15 @@ def feature_context(request,obj):
         change_lines=list(obj.lines.select_related('order_line').all())
         for line in change_lines:
             line.display_net=line.net_amount
-            if line.display_net is None and obj.status=='pending':line.display_net=pricing.line_net(line,obj.order.discount)
+            if line.display_net is None and obj.status=='pending':line.display_net=pricing.line_net(line,pricing.change_discount(obj))
         context['change_lines']=change_lines
+        if obj.status=='pending' and obj.revise_payment_plan and obj.proposed_total!=obj.order.total:
+            rows=receivables.plan_rows(obj.order)
+            try:
+                values=receivables.revised_amounts(obj.proposed_total,rows)
+                context['plan_revision_preview']=[dict(row,new_amount=value,new_balance=value-row['paid']) for row,value in zip(rows,values)]
+            except ValidationError as exc:context['plan_revision_error']='；'.join(exc.messages)
+
         form=ChangeLineForm(request.user,obj)
         fields=[name for name in pricing.SNAPSHOT_FIELDS if name in form.fields]
         context['change_source_lines']={str(line.pk):{name:str(getattr(line,name)) for name in fields} for line in obj.order.lines.all()}
@@ -65,7 +73,8 @@ def feature_context(request,obj):
         context['can_change_lines']=obj.status=='pending' and scoped(request.user,m.ChangeRequest,action='edit').filter(pk=obj.pk).exists()
     if obj.module in evidence.PARENTS:
         context['attachments']=m.Attachment.objects.filter(organization=obj.organization,object_type=obj.module,object_id=obj.pk,deleted_at__isnull=True).select_related('owner')
-        context['can_attach']=scoped(request.user,type(obj),action='edit').filter(pk=obj.pk).exists()
+        context['can_attach']=evidence.can_write_evidence(request.user,obj)
+        context['shared_evidence']=isinstance(obj,m.Handoff)
     context['today_iso']=str(timezone.localdate())
     return context
 
@@ -76,7 +85,8 @@ def upload(request,key,pk):
     obj=record_for(request,module_for(key),pk)
     try:
         if 'file' not in request.FILES:raise ValidationError('请选择文件。')
-        evidence.upload_attachment(request.user,obj,request.FILES['file'],request.POST.get('kind','drawing'))
+        evidence.upload_attachment(request.user,obj,request.FILES['file'],request.POST.get('kind','drawing'),share_confirmed=request.POST.get('share_confirmed')=='on',
+            parent_version=request.POST.get('parent_version'),target_id=request.POST.get('target_id'))
         messages.success(request,'附件已私有保存，下载将实时校验业务权限。')
     except BUSINESS_ERRORS as exc:messages.error(request,error_message(exc))
     return redirect('detail',key=key,pk=pk)

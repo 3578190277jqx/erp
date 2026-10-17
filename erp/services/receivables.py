@@ -70,3 +70,38 @@ def reschedule_plan(user,order):
         if plan.due_date!=due:
             before=snapshot(plan);plan.due_date=due;save_version(plan,plan.version)
             audit(user,plan,'reschedule_payment_plan',before)
+
+
+def revised_amounts(total,previous_rows):
+    """Pure preview shared with approval; preserve every historical allocation."""
+    if not previous_rows:return []
+    from decimal import ROUND_DOWN
+    paid=[row['paid'] for row in previous_rows]
+    if any(row['balance']<0 for row in previous_rows):raise ValidationError('分期已收数据异常，请财务核对。')
+    remaining=total-sum(paid,Decimal(0))
+    if remaining<0:raise ValidationError('新合同金额不能低于已收。')
+    weights=[row['balance'] for row in previous_rows];weight=sum(weights,Decimal(0))
+    cents=int(remaining*100)
+    shares=[Decimal(cents)*value/weight for value in weights] if weight else [Decimal(0)]*len(previous_rows)
+    allocated=[int(value.to_integral_value(rounding=ROUND_DOWN)) for value in shares]
+    if weight:
+        ranked=sorted(range(len(previous_rows)),key=lambda i:(-(shares[i]-allocated[i]),i))
+        for index in ranked[:cents-sum(allocated)]:allocated[index]+=1
+    else:allocated[-1]=cents
+    return [paid[i]+Decimal(value)/100 for i,value in enumerate(allocated)]
+
+
+def revise_plan(user,order,previous_rows):
+    """Preserve allocations; spread only new outstanding money, in cents."""
+    if not previous_rows:return
+    plans=list(order.payment_plans.select_for_update())
+    if [p.pk for p in plans]!=[row['plan'].pk for row in previous_rows]:
+        raise ValidationError('分期记录已变化，请重新核对。')
+    amounts=revised_amounts(order.total,previous_rows)
+    before={'plans':[snapshot(plan) for plan in plans]}
+    for i,plan in enumerate(plans):
+        old=snapshot(plan);plan.amount=amounts[i]
+        if plan.amount!=Decimal(old['amount']):
+            save_version(plan,plan.version);audit(user,plan,'revise_payment_plan',old)
+    audit(user,order,'revise_payment_plan',before,after={'plans':[snapshot(plan) for plan in plans],
+          'policy':'已收核销保持，按原未收比例分配；原全部结清时新增未收归尾款。'})

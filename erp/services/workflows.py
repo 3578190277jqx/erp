@@ -108,25 +108,33 @@ def prerequisites(user, obj, action, note):
         received = sum((p.amount for p in order.payment_set.all()), 0)
         if obj.proposed_total < received:
             raise ValidationError('变更金额不能少于已收款。')
+        if obj.proposed_total != order.total and order.payment_plans.exists() and not obj.revise_payment_plan:
+            raise ValidationError('请在申请中勾选同步修订分期，系统将保留已收核销并重排未收金额。')
         if obj.proposed_total != order.total and order.payment_plans.exists():
-            raise ValidationError('已有分期计划的订单不可只改合同额，请先由财务处理计划修订。')
+            if sum((p.amount for p in order.payment_plans.all()),0)!=order.total:
+                raise ValidationError('现有分期与原合同金额不一致，请先财务核对。')
+        if obj.lines.exists() and not order.lines.exists() and order.total>0 and not obj.restore_product_snapshot:
+            raise ValidationError('原合同缺少产品快照，必须明确完整补录全部产品。')
         if m.Handoff.objects.filter(order=order,status__in=['sent','accepted','completed']).exists():
             raise ValidationError('订单已交接工厂，请先解决交接后再修改。')
-        if obj.lines.exists():
-            from .pricing import proposed_lines, rounded
+        if obj.proposed_total!=order.total:
+            from .pricing import validate_pricing_basis
+            validate_pricing_basis(obj)
+        if obj.lines.exists() or obj.proposed_discount is not None:
+            from .pricing import change_total,validate_pricing_basis
+            validate_pricing_basis(obj)
             if m.Breakdown.objects.filter(order=order).exists():
                 raise ValidationError('订单已进入拆单，不能直接修改产品，请先处理生产变更。')
-            net = sum((line['line_total'] for line in proposed_lines(obj).values()), 0)
-            if obj.proposed_total != net + rounded(net*order.tax_rate):
+            if obj.proposed_total != change_total(obj):
                 raise ValidationError('变更总额与产品增减项不一致，请重新核对。')
-        if order.lines.exists() and not obj.lines.exists() and obj.proposed_total != order.total:
+        if order.lines.exists() and not obj.lines.exists() and obj.proposed_discount is None and obj.proposed_total != order.total:
             raise ValidationError('有产品明细的订单必须通过增减项计算变更金额。')
 
 
 def effects(user, obj, action):
     if isinstance(obj, m.Quote) and action == 'accept':
         order = m.Order.objects.create(organization=obj.organization, owner=obj.owner, customer=obj.customer,
-                               quote=obj, title=obj.title, total=obj.total,tax_rate=obj.tax_rate,discount=obj.discount)
+                               quote=obj, title=obj.title, total=obj.total,tax_rate=obj.tax_rate,discount=obj.discount,discount_confirmed=True)
         from .pricing import copy_quote_lines
         copy_quote_lines(obj,order)
         system_update(user, obj.customer, 'quote_accepted', status='won')
@@ -154,9 +162,13 @@ def effects(user, obj, action):
         system_update(user, obj.order, 'installation_completed', status='completed')
     elif isinstance(obj, m.ChangeRequest) and action == 'approve':
         from .pricing import apply_change_lines
+        from .receivables import reschedule_plan,revise_plan,plan_rows
+        old_order=obj.order;allocations=plan_rows(old_order)
         apply_change_lines(user,obj)
-        updated=system_update(user, obj.order, 'approved_change', total=obj.proposed_total, due_date=obj.proposed_due_date)
-        from .receivables import reschedule_plan
+        values={'total':obj.proposed_total,'due_date':obj.proposed_due_date}
+        if obj.proposed_discount is not None:values.update(discount=obj.proposed_discount,discount_confirmed=True)
+        updated=system_update(user, obj.order, 'approved_change', **values)
+        if updated.total!=old_order.total:revise_plan(user,updated,allocations)
         reschedule_plan(user,updated)
 
 

@@ -30,6 +30,8 @@ def send_handoff(user,order,target,version,note='',handoff_version=None):
         except (TypeError,ValueError):raise ValidationError('重发需有效的交接版本，请刷新。')
         if existing.status not in ('rejected','withdrawn') or existing.version!=expected:
             raise ValidationError('只有已拒单或已撤回的交接可重发，请刷新。')
+    if existing and existing.target_organization_id!=target.pk and m.Attachment.objects.filter(object_type='handoffs',object_id=existing.pk,deleted_at__isnull=True).exists():
+        raise ValidationError('改派工厂前请先移除旧交接附件，并核对新工厂可共享的文件。')
     payload = {'title':order.title,'source_code':order.code,'source_version':order.version,
                'due_date':str(order.due_date or ''),
                'lines':[{field:str(getattr(line,field)) for field in PRODUCTION_FIELDS} for line in order.lines.filter(category='product')]}
@@ -129,8 +131,9 @@ def return_progress(user,factory_order,status):
         raise ValidationError('仅支持开工或完工回传。')
     if not factory_order.source_handoff_id:
         return
+    source_id=m.Handoff.objects.values_list('order_id',flat=True).get(pk=factory_order.source_handoff_id)
+    source = m.Order.objects.select_for_update().get(pk=source_id)
     handoff = m.Handoff.objects.select_for_update().get(pk=factory_order.source_handoff_id)
-    source = m.Order.objects.select_for_update().get(pk=handoff.order_id)
     expected = 'confirmed' if status=='producing' else 'producing'
     if source.status != expected:
         raise ValidationError('门店订单状态已变化，不能回传生产进度。')

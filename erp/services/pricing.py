@@ -35,17 +35,44 @@ def copy_quote_lines(quote, order):
             line_total=line_net(line,order.discount),**values)
 
 
+def change_discount(change):
+    return change.proposed_discount if change.proposed_discount is not None else change.order.discount
+
+
+def validate_pricing_basis(change):
+    if not change.order.discount_confirmed and change.proposed_discount is None:
+        raise ValidationError('历史合同折扣口径未知，请在变更申请中明确拟采用折扣并经审批核对。')
+
+
+def change_total(change):
+    # A discount declaration without any product evidence cannot reconstruct a
+    # historical contract amount. Preserve that header until a full restore.
+    if not change.order.lines.exists() and not (change.pk and change.lines.exists()):
+        return change.order.total
+    net=sum((line['line_total'] for line in proposed_lines(change).values()),Decimal(0))
+    return net+rounded(net*change.order.tax_rate)
+
+
+def refresh_change_pricing(change):
+    for line in change.lines.all():
+        line.net_amount=line_net(line,change_discount(change)) if line.operation!='remove' else Decimal(0)
+        line.full_clean();line.save(update_fields=['net_amount'])
+    change.proposed_total=change_total(change)
+
+
 def proposed_lines(change):
     lines = {line.pk:{field:getattr(line,field) for field in SNAPSHOT_FIELDS} | {'line_total':line.line_total}
              for line in change.order.lines.all()}
-    for line in change.lines.all():
+    if change.proposed_discount is not None:
+        for current in change.order.lines.all():lines[current.pk]['line_total']=line_net(current,change.proposed_discount)
+    for line in (change.lines.all() if change.pk else []):
         if line.operation in ('update','remove') and line.order_line_id not in lines:
             raise ValidationError('原订单产品不存在或被重复修改。')
         if line.operation in ('update','remove'):
             del lines[line.order_line_id]
         if line.operation != 'remove':
             lines[f'new-{line.pk}'] = {key:getattr(line,key) for key in SNAPSHOT_FIELDS}
-            lines[f'new-{line.pk}']['line_total'] = line_net(line,change.order.discount)
+            lines[f'new-{line.pk}']['line_total'] = line_net(line,change_discount(change))
     return lines
 
 
@@ -56,6 +83,9 @@ def add_change_line(user, change, values, version):
     change = lock(user,change,'edit',version)
     if change.status != 'pending':
         raise ValidationError('已审批的变更不能修改。')
+    validate_pricing_basis(change)
+    if not change.order.lines.exists() and change.order.total>0 and not change.restore_product_snapshot:
+        raise ValidationError('原合同缺少产品快照。请勾选完整补录并录入全部产品，不能只添加新增费用。')
     allowed = {'operation','order_line',*SNAPSHOT_FIELDS}
     if set(values)-allowed:
         raise ValidationError('变更明细字段无效。')
@@ -75,12 +105,10 @@ def add_change_line(user, change, values, version):
     before = snapshot(change)
     line = m.ChangeLine(change=change,**values)
     line.full_clean()
-    line.net_amount=line_net(line,change.order.discount) if line.operation!='remove' else Decimal(0)
+    line.net_amount=line_net(line,change_discount(change)) if line.operation!='remove' else Decimal(0)
     line._meta.get_field('net_amount').clean(line.net_amount,line)
     line.save()
-    proposed = proposed_lines(change)
-    net = sum((v['line_total'] for v in proposed.values()),Decimal(0))
-    change.proposed_total = net + rounded(net*change.order.tax_rate)
+    change.proposed_total = change_total(change)
     save_version(change,version)
     audit(user,change,'add_change_line',before)
     return change
@@ -89,17 +117,21 @@ def add_change_line(user, change, values, version):
 def apply_change_lines(user,change):
     # Historical rows are retained via before/after audit snapshots; protected BOM
     # anchors prevent dropping products that already drove manufacturing.
-    before = {'lines':[snapshot(line) for line in change.order.lines.all()]}
+    before = {'discount':str(change.order.discount),'lines':[snapshot(line) for line in change.order.lines.all()]}
     for line in change.lines.all():
         if line.operation == 'remove':
             line.order_line.delete()
         else:
             values = {k:getattr(line,k) for k in SNAPSHOT_FIELDS}
-            values['line_total'] = line_net(line,change.order.discount)
+            values['line_total'] = line_net(line,change_discount(change))
             line.net_amount=values['line_total'];line.save(update_fields=['net_amount'])
             if line.operation == 'update':
                 m.OrderLine.objects.filter(pk=line.order_line_id).update(**values)
             else:
                 m.OrderLine.objects.create(order=change.order,**values)
+    if change.proposed_discount is not None:
+        for item in change.order.lines.all():
+            item.line_total=line_net(item,change.proposed_discount)
+            item.full_clean();item.save(update_fields=['line_total'])
     audit(user,change.order,'change_products',before=before,
-          after={'change':change.code,'lines':[snapshot(line) for line in change.order.lines.all()]})
+          after={'change':change.code,'discount':str(change_discount(change)),'lines':[snapshot(line) for line in change.order.lines.all()]})

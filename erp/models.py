@@ -216,6 +216,7 @@ class Order(Record):
     due_date = models.DateField('承诺交期', null=True, blank=True)
     total = money_field('合同金额')
     discount = models.DecimalField('合同折扣快照',max_digits=5,decimal_places=4,default=1,validators=[MinValueValidator(0),MaxValueValidator(1)])
+    discount_confirmed = models.BooleanField('合同折扣口径已核对',default=False)
     tax_rate = models.DecimalField('税率', max_digits=5, decimal_places=4, default=0, validators=[MinValueValidator(0),MaxValueValidator(1)])
     kind = models.CharField('订单类型', max_length=20, default='sale', choices=[('sale','销售订单'),('manufacturing','工厂生产订单')])
     source_handoff = models.OneToOneField('Handoff', verbose_name='来源交接', null=True, blank=True,
@@ -435,6 +436,10 @@ class ChangeRequest(Record):
     module = 'changes'
     order = models.ForeignKey(Order, verbose_name='变更订单', on_delete=models.PROTECT)
     proposed_total = money_field('变更后金额')
+    proposed_discount = models.DecimalField('拟更正合同折扣（留空沿用）',max_digits=5,decimal_places=4,null=True,blank=True,
+                                           validators=[MinValueValidator(0),MaxValueValidator(1)])
+    revise_payment_plan = models.BooleanField('金额变化时同步修订分期（已收不挪期）',default=False)
+    restore_product_snapshot = models.BooleanField('本次完整补录缺失的全部产品快照',default=False)
     proposed_due_date = models.DateField('变更后交期')
     order_version = models.PositiveIntegerField('申请时订单版本', editable=False)
     requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name='申请人',

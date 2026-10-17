@@ -6,7 +6,7 @@ from django.test import TransactionTestCase
 
 
 class HistoricalUpgradeTests(TransactionTestCase):
-    latest=('erp','0013_recoverable_withdrawals')
+    latest=('erp','0015_backfill_contract_basis')
 
     def tearDown(self):
         MigrationExecutor(connection).migrate([self.latest])
@@ -33,6 +33,7 @@ class HistoricalUpgradeTests(TransactionTestCase):
         executor=MigrationExecutor(connection);executor.migrate([self.latest])
         from erp import models as m
         self.assertEqual(m.Order.objects.get(pk=order.pk).total,850)
+        self.assertTrue(m.Order.objects.get(pk=order.pk).discount_confirmed)
         self.assertEqual(m.Order.objects.get(pk=order.pk).discount,Decimal('.9'))
         self.assertEqual(m.OrderLine.objects.get(order_id=order.pk).line_total,900)
         self.assertEqual(m.OrderLine.objects.get(order_id=order.pk).name,'原产品')
@@ -70,4 +71,6 @@ class HistoricalUpgradeTests(TransactionTestCase):
         self.assertEqual(m.ChangeLine.objects.count(),2)
         self.assertTrue(all(value is None for value in m.ChangeLine.objects.values_list('net_amount',flat=True)))
         self.assertEqual(m.CollaborationRoute.objects.count(),0)
+        self.assertFalse(m.Order.objects.filter(kind='sale',discount_confirmed=True).exists())
+        self.assertFalse(m.Order.objects.filter(kind='manufacturing',discount_confirmed=False).exists())
         self.assertTrue(m.AuditEvent.objects.filter(action='upgrade_change_review').exists())
