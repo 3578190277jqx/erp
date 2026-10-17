@@ -184,7 +184,7 @@ def detail(request, key, pk):
                'can_edit': editable(obj) and can(request.user, module.model.module, 'edit', obj.organization_id)
                            and scoped(request.user, module.model, action='edit').filter(pk=obj.pk).exists(),
                'actions': [(a, text) for a, text in available_actions(obj) if scoped(request.user, module.model, action=a).filter(pk=obj.pk).exists()] if hasattr(obj, 'status') else [],
-               'events': m.AuditEvent.objects.filter(organization=obj.organization, code=obj.code)[:12]}
+               'events': m.AuditEvent.objects.filter(organization=obj.organization, code=obj.code).order_by('-created_at','-pk')[:12]}
     if isinstance(obj,m.Handoff):
         from erp.services.collaboration import handoff_actions
         context['actions']=handoff_actions(request.user,obj)
@@ -223,6 +223,12 @@ def detail(request, key, pk):
             context.update({'paid': paid, 'balance': obj.total - paid})
     from .features import feature_context
     context.update(feature_context(request,obj))
+    if isinstance(obj,m.ChangeRequest) and obj.status=='pending' and any(a=='approve' for a,_ in context['actions']):
+        from erp.services.workflows import validate_change_approval
+        try:validate_change_approval(request.user,obj)
+        except ValidationError as exc:
+            context['change_approval_blocker']='；'.join(exc.messages)
+            context['actions']=[(a,t) for a,t in context['actions'] if a!='approve']
     if isinstance(obj,m.ChangeRequest) and (context.get('change_review',{}).get('error') or context.get('change_review',{}).get('version_changed')):
         context['actions']=[(a,t) for a,t in context['actions'] if a!='approve']
         if context.get('change_review',{}).get('error'):

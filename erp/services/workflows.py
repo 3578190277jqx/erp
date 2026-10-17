@@ -95,32 +95,41 @@ def prerequisites(user, obj, action, note):
     if isinstance(obj,m.ChangeRequest) and action=='withdraw' and obj.requested_by_id!=user.pk:
         raise ValidationError('只有真实申请人可撤回待审批变更。')
     if isinstance(obj, m.ChangeRequest) and action == 'approve':
-        last_editor = m.AuditEvent.objects.filter(object_type='changes', object_id=obj.pk,
-                      action__in=('edit','add_change_line','remove_change_line')).first()
-        if obj.requested_by_id == user.pk or (last_editor and last_editor.owner_id == user.pk):
-            raise ValidationError('申请人不能审批自己的变更。')
-        order = m.Order.objects.select_for_update().get(pk=obj.order_id)
-        if order.source_handoff_id:
-            raise ValidationError('工厂订单来自冻结的交接快照，不能单边修改产品与合同。')
-        if order.version != obj.order_version:
-            raise ValidationError('订单版本已变化，请移除失效行并编辑重新核对后再审批。')
-        if order.status not in ('confirmed', 'producing', 'ready', 'shipping', 'installing'):
-            raise ValidationError('当前订单状态不允许变更。')
-        received = sum((p.amount for p in order.payment_set.all()), 0)
-        if obj.proposed_total < received:
-            raise ValidationError('变更金额不能少于已收款。')
-        if obj.proposed_total != order.total and order.payment_plans.exists() and not obj.revise_payment_plan:
-            raise ValidationError('请在申请中勾选同步修订分期，系统将保留已收核销并重排未收金额。')
-        if obj.proposed_total != order.total and order.payment_plans.exists():
-            if sum((p.amount for p in order.payment_plans.all()),0)!=order.total:
-                raise ValidationError('现有分期与原合同金额不一致，请先财务核对。')
-        if m.Handoff.objects.filter(order=order,status__in=['sent','accepted','completed']).exists():
-            raise ValidationError('订单已交接工厂，请先解决交接后再修改。')
-        from .pricing import prepare_change
-        prepare_change(obj,verify=True)
-        if obj.lines.exists() or obj.proposed_discount is not None:
-            if m.Breakdown.objects.filter(order=order).exists():
-                raise ValidationError('订单已进入拆单，不能直接修改产品，请先处理生产变更。')
+        order=m.Order.objects.select_for_update().get(pk=obj.order_id)
+        validate_change_approval(user,obj,order)
+
+
+def validate_change_approval(user,obj,order=None):
+    """Read-only preview and locked POST use the same business guards."""
+    last_editor = m.AuditEvent.objects.filter(object_type='changes', object_id=obj.pk,
+                  action__in=('edit','add_change_line','remove_change_line')).order_by('-pk').first()
+    if obj.requested_by_id == user.pk:
+        raise ValidationError('申请人不能审批自己的变更。')
+    if last_editor and last_editor.owner_id == user.pk:
+        raise ValidationError('最后修改人不能审批自己的变更，请交其他管理人员核对。')
+    order = order or obj.order
+    obj.order = order
+    if order.source_handoff_id:
+        raise ValidationError('工厂订单来自冻结的交接快照，不能单边修改产品与合同。')
+    if order.version != obj.order_version:
+        raise ValidationError('订单版本已变化，请移除失效行并编辑重新核对后再审批。')
+    if order.status not in ('confirmed', 'producing', 'ready', 'shipping', 'installing'):
+        raise ValidationError('当前订单状态不允许变更。')
+    received = sum((p.amount for p in order.payment_set.all()), 0)
+    if obj.proposed_total < received:
+        raise ValidationError('变更金额不能少于已收款。')
+    if obj.proposed_total != order.total and order.payment_plans.exists() and not obj.revise_payment_plan:
+        raise ValidationError('请在申请中勾选同步修订分期，系统将保留已收核销并重排未收金额。')
+    if obj.proposed_total != order.total and order.payment_plans.exists():
+        if sum((p.amount for p in order.payment_plans.all()),0)!=order.total:
+            raise ValidationError('现有分期与原合同金额不一致，请先财务核对。')
+    if m.Handoff.objects.filter(order=order,status__in=['sent','accepted','completed']).exists():
+        raise ValidationError('订单已交接工厂，请先解决交接后再修改。')
+    from .pricing import prepare_change
+    prepare_change(obj,verify=True)
+    if obj.lines.exists() or obj.proposed_discount is not None:
+        if m.Breakdown.objects.filter(order=order).exists():
+            raise ValidationError('订单已进入拆单，不能直接修改产品，请先处理生产变更。')
 
 
 def effects(user, obj, action):

@@ -107,3 +107,105 @@ class LifecycleTests(ERPTestCase):
         m.Handoff.objects.filter(pk=self.handoff.pk).update(version=F('version')+1)
         files,rights,stale=evidence.attachment_context(self.receiver,self.handoff)
         self.assertEqual(files,[]);self.assertFalse(rights.visible);self.assertTrue(stale)
+
+    def test_purge_only_retries_authorized_deletions_not_archived_files(self):
+        from io import StringIO
+        from django.core.management import call_command
+        archived=self.upload(self.receiver)
+        evidence.stop_sharing_attachment(self.manager,archived,archived.version,self.handoff.version,'误传')
+        deleted=self.upload(self.sales)
+        evidence.delete_attachment(self.sales,deleted,deleted.version)
+        call_command('purge_attachments',stdout=StringIO())
+        archived.refresh_from_db();deleted.refresh_from_db()
+        self.assertTrue(archived.file.storage.exists(archived.file.name));self.assertIsNone(archived.purged_at)
+        self.assertFalse(deleted.file.storage.exists(deleted.file.name));self.assertIsNotNone(deleted.purged_at)
+
+
+class ApprovalConsistencyTests(ERPTestCase):
+    def change(self,order,**values):
+        return m.ChangeRequest.objects.create(organization=order.organization,owner=self.sales,requested_by=self.sales,
+            order=order,order_version=order.version,proposed_total=values.pop('proposed_total',order.total),
+            proposed_due_date=date(2026,12,1),note='六次评审核对',**values)
+
+    def event(self,change,user,action='edit'):
+        return m.AuditEvent.objects.create(organization=change.organization,owner=user,object_type='changes',
+                  object_id=change.pk,code=change.code,action=action)
+
+    def test_ui_matches_each_server_approval_blocker(self):
+        cases=('applicant','editor','factory','version','status','received','plan','plan_sum','handoff','pricing','breakdown')
+        factory=m.Organization.objects.create(name='审批工厂',kind='factory')
+        m.Membership.objects.create(user=self.manager,organization=factory,role='manager',scope='org')
+        for case in cases:
+            with self.subTest(case=case):
+                order=self.order(status='confirmed');change=self.change(order)
+                if case=='applicant':change.requested_by=self.manager
+                if case=='editor':self.event(change,self.manager)
+                if case=='factory':
+                    source=order
+                    handoff=self.make(m.Handoff,order=source,target_organization=factory,payload={})
+                    customer=m.Customer.objects.create(organization=factory,owner=self.manager,name='工厂客户',phone='内部')
+                    order=m.Order.objects.create(organization=factory,owner=self.manager,customer=customer,title='工厂单',kind='manufacturing',
+                        source_handoff=handoff,status='confirmed',discount_confirmed=True)
+                    change.order=order;change.organization=factory;change.proposed_total=0
+                if case=='version':change.order_version=99
+                if case=='status':order.status='completed';order.save(update_fields=['status'])
+                if case=='received':
+                    self.make(m.Payment,order=order,direction='in',amount=800,paid_date=date.today(),reference='SIX-PAID')
+                    change.proposed_total=600
+                if case in ('plan','plan_sum'):
+                    self.make(m.PaymentPlan,order=order,sequence=1,name='测试期',amount=1000 if case=='plan' else 900,
+                              due_date=date.today(),gate='start')
+                    change.proposed_total=1100;change.revise_payment_plan=case=='plan_sum'
+                if case=='handoff':self.make(m.Handoff,order=order,target_organization=factory,payload={})
+                if case in ('pricing','breakdown'):
+                    m.OrderLine.objects.create(order=order,name='原产品',quantity=1,unit_price=1000,line_total=1000)
+                    if case=='pricing':change.proposed_total=1100
+                    else:
+                        change.proposed_discount=1
+                        self.make(m.Breakdown,order=order)
+                change.save()
+                with self.assertRaises(ValidationError) as blocked:services.transition(self.manager,change,'approve',change.version)
+                self.client.force_login(self.manager);response=self.client.get(f'/modules/changes/{change.pk}/')
+                self.assertEqual(response.status_code,200)
+                self.assertEqual(response.context.get('change_approval_blocker'),'；'.join(blocked.exception.messages))
+                self.assertFalse(any(action=='approve' for action,_ in response.context['actions']))
+                self.assertContains(response,'暂不可批准')
+
+    def test_valid_approval_preview_is_read_only_and_remains_approvable(self):
+        order=self.order(status='confirmed');change=self.change(order)
+        self.client.force_login(self.manager);before=m.AuditEvent.objects.count()
+        with patch.object(m.Order.objects,'select_for_update',side_effect=AssertionError('GET approval must not lock')):
+            response=self.client.get(f'/modules/changes/{change.pk}/')
+        self.assertTrue(any(action=='approve' for action,_ in response.context['actions']))
+        self.assertEqual(m.AuditEvent.objects.count(),before)
+        services.transition(self.manager,change,'approve',change.version)
+
+    def test_tied_audits_cannot_hide_the_last_product_editor(self):
+        order=self.order(status='confirmed');change=self.change(order)
+        first=self.event(change,self.sales);last=self.event(change,self.manager,'remove_change_line')
+        m.AuditEvent.objects.filter(pk__in=[first.pk,last.pk]).update(created_at=last.created_at)
+        with self.assertRaises(ValidationError):services.transition(self.manager,change,'approve',change.version)
+        services.transition(self.admin,change,'approve',change.version)
+
+    def test_recalculated_amount_records_current_order_version_without_confirming_it(self):
+        order=self.order(status='confirmed');change=self.change(order)
+        product=m.OrderLine.objects.create(order=order,name='原产品',quantity=1,unit_price=1000,line_total=1000)
+        pricing.add_change_line(self.admin,change,dict(operation='add',name='增项',quantity=1,unit_price=200),change.version)
+        change.refresh_from_db();old_version=change.order_version
+        order.total=1300;order.version+=1;order.save()
+        product.unit_price=1300;product.line_total=1300;product.save()
+        pricing.remove_change_line(self.admin,change,change.lines.get().pk,change.version)
+        change.refresh_from_db();self.assertEqual(change.order_version,old_version);self.assertEqual(change.proposed_total,1300)
+        data=m.AuditEvent.objects.get(action='remove_change_line').after
+        self.assertEqual(data.get('recalculated_against_order_version'),order.version)
+        with self.assertRaises(ValidationError):services.transition(self.manager,change,'approve',change.version)
+
+    def test_failed_recalculation_is_not_recorded_as_a_successful_new_baseline(self):
+        order=self.order(status='confirmed');change=self.change(order)
+        lines=[m.ChangeLine.objects.create(change=change,operation='update',name='已失效',quantity=1,unit_price=500) for _ in range(2)]
+        pricing.remove_change_line(self.admin,change,lines[0].pk,change.version)
+        data=m.AuditEvent.objects.get(action='remove_change_line').after
+        self.assertIn('recalculated_against_order_version',data)
+        self.assertIsNone(data['recalculated_against_order_version'])
+        self.assertEqual(data.get('attempted_order_version'),order.version)
+        self.assertTrue(data['recalculation_error'])

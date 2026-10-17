@@ -163,7 +163,9 @@ def remove_change_line(user,change,line_id,version):
         if getattr(exc,'code',None) not in ('missing_source_line','duplicate_source_line'):raise
         recalculation_error='；'.join(exc.messages)
     save_version(change,change.version)
-    audit(user,change,'remove_change_line',before,after={'change':snapshot(change),'recalculation_error':recalculation_error})
+    audit(user,change,'remove_change_line',before,after={'change':snapshot(change),'recalculation_error':recalculation_error,
+          'recalculated_against_order_version':None if recalculation_error else parent.version,
+          'attempted_order_version':parent.version})
     return change
 
 
