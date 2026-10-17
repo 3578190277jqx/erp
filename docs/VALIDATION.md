@@ -1,3 +1,40 @@
+# 验证记录 · v1.1.3 四次评审修正
+
+2026-10-17，功能提交 `128c512`。**128用例**：SQLite121通过/7个PG专用跳过；PostgreSQL127通过/1个SQLite备份专用跳过。Ubuntu/Windows×Python3.12/3.13和PostgreSQL16五组CI全绿：[运行日志](https://github.com/3578190277jqx/erp/actions/runs/39017457480)。后续文档提交以原PR Checks为准。
+
+- 空字段缺失、空串、有/无产品、创建/编辑、未知口径仅改期、显式0、伪造派生总额都有回归。服务器准备函数共用于四个入口；审批验证不静默纠正存储值。
+- 新增真实PG竞争：改派与新厂鉴权同时发生，旧厂文件不泄漏。原六类PG竞争保持；历史升级到0016验证旧文件名/版本/目标组织/合同额不改，归档字段为null。
+- 独立审查发现草稿护栏提前、附件删除约束阻断改派两项，均RED→GREEN修正。首次额度中断未形成审查报告，有效重试完成一次只读审查；无第二次审查通过的虚构声明。
+- 本机预升级SQLite及media备份保留在忽略目录，integrity_check=ok，0016实际应用。原密码、已批合同和付款凭证不重置。
+- check、makemigrations无漂移、collectstatic及生产check --deploy --fail-level WARNING通过。
+- Chrome新建申请清空金额、只改交期，拟额仍11676.79；另一店长批准，合同不变/交期2026-12-15，后两期日期同步，已收尾款100不动。
+- Chrome历史差异样例：原合同850、产品900、拟折扣仍0.9，拟额900；详情及确认框明确850→900/+50。取消批准保留原合同850，供继续检查。
+- Chrome门店与工厂各上传1个虚构PDF，各自只显示自己的删除按钮，工厂试图跨删门店文件POST403。
+- Chrome源销售撤回后改派另一厂，无需删除工厂文件；旧两文件标记归档、deleted_at仍null、版本1→2、物理文件存在。源店下载归档200，新厂两个文件下载均403且列表为空；新厂接单成功，生产单total0、discount_confirmed=True。
+- 孤立附件在锁定父单时查不到原单据，仍返回拒绝访问，不泄漏服务端错误；新增回归验证。
+- Chrome完整补录实操显示原0条/本次1条/拟1条，保留人工完整性核对警告。
+- 390×844审批比较页scrollWidth=390；主业务页控制台0错误/0警告。样例与截图均不含真实客户数据。
+
+规则、处置矩阵及保留边界见 [S1–S6记录](V113_FOURTH_REVIEW_RESPONSE.md)。旧零额申请不猜意图；完整补录须人工核对；归档保持源店可读，需与media配套备份。
+
+![金额留空仅改期](screenshots/v113-date-only.png)
+
+![历史金额差异](screenshots/v113-mismatch-review.png)
+
+![批准确认明确改价影响](screenshots/v113-mismatch-confirm.png)
+
+![双端附件按上传者删除](screenshots/v113-evidence-ownership.png)
+
+![改派旧证据保留归档](screenshots/v113-reassigned-archive.png)
+
+![完整补录人工核对](screenshots/v113-full-restore-review.png)
+
+![手机审批核对](screenshots/v113-mobile-review.png)
+
+---
+
+以下为前轮验证历史，数字与范围仅代表当时版本。
+
 # 验证记录 · v1.1.2 三次评审修正
 
 2026-10-17，提交 `6b0c375`。**111个用例**：SQLite105通过/6个PG专用跳过；PostgreSQL110通过/1个SQLite备份专用跳过。Ubuntu/Windows × Python3.12/3.13及PostgreSQL16五组CI全部成功：[运行日志](https://github.com/3578190277jqx/erp/actions/runs/38994189997)。最新提交的额外资源版本号和截图以原PR检查为准。
