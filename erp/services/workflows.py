@@ -113,22 +113,13 @@ def prerequisites(user, obj, action, note):
         if obj.proposed_total != order.total and order.payment_plans.exists():
             if sum((p.amount for p in order.payment_plans.all()),0)!=order.total:
                 raise ValidationError('现有分期与原合同金额不一致，请先财务核对。')
-        if obj.lines.exists() and not order.lines.exists() and order.total>0 and not obj.restore_product_snapshot:
-            raise ValidationError('原合同缺少产品快照，必须明确完整补录全部产品。')
         if m.Handoff.objects.filter(order=order,status__in=['sent','accepted','completed']).exists():
             raise ValidationError('订单已交接工厂，请先解决交接后再修改。')
-        if obj.proposed_total!=order.total:
-            from .pricing import validate_pricing_basis
-            validate_pricing_basis(obj)
+        from .pricing import prepare_change
+        prepare_change(obj,verify=True)
         if obj.lines.exists() or obj.proposed_discount is not None:
-            from .pricing import change_total,validate_pricing_basis
-            validate_pricing_basis(obj)
             if m.Breakdown.objects.filter(order=order).exists():
                 raise ValidationError('订单已进入拆单，不能直接修改产品，请先处理生产变更。')
-            if obj.proposed_total != change_total(obj):
-                raise ValidationError('变更总额与产品增减项不一致，请重新核对。')
-        if order.lines.exists() and not obj.lines.exists() and obj.proposed_discount is None and obj.proposed_total != order.total:
-            raise ValidationError('有产品明细的订单必须通过增减项计算变更金额。')
 
 
 def effects(user, obj, action):

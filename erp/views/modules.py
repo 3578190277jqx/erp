@@ -237,9 +237,6 @@ def validate_creation(obj):
         if obj.order.source_handoff_id:
             raise ValidationError('工厂生产订单的交接快照不可通过本地变更修订。')
         obj.order_version = obj.order.version
-        if obj.proposed_discount is not None:
-            from erp.services.pricing import change_total
-            obj.proposed_total=change_total(obj)
 
 
 @login_required
@@ -260,6 +257,8 @@ def edit_record(request, key, pk=None):
                 selected = form.fields[name].queryset.filter(pk=request.GET[name]).first()
                 if selected:
                     form.initial[name] = selected.pk
+                    if isinstance(form.instance,m.ChangeRequest) and name=='order' and not pk:
+                        form.initial.update(proposed_total=selected.total,proposed_due_date=selected.due_date)
     if request.method == 'POST' and form.is_valid():
         try:
             with transaction.atomic():
@@ -287,9 +286,8 @@ def edit_record(request, key, pk=None):
                         candidate.total = quote_amounts(candidate)['total']
                     if isinstance(candidate,m.ChangeRequest):
                         candidate.order=parent;candidate.order_version=parent.version
-                        if candidate.proposed_discount is not None or candidate.lines.exists():
-                            from erp.services.pricing import refresh_change_pricing
-                            refresh_change_pricing(candidate)
+                        from erp.services.pricing import prepare_change
+                        prepare_change(candidate,submitted_total=form.cleaned_data.get('proposed_total'),persist_lines=True)
                     save_version(candidate, fresh.version)
                     audit(request.user, candidate, 'edit', before)
                 else:
@@ -300,6 +298,8 @@ def edit_record(request, key, pk=None):
                     validate_creation(candidate)
                     if isinstance(candidate, m.ChangeRequest):
                         candidate.requested_by = request.user
+                        from erp.services.pricing import prepare_change
+                        prepare_change(candidate,submitted_total=form.cleaned_data.get('proposed_total'))
                     candidate.full_clean(exclude=['code'])
                     candidate.save()
                     audit(request.user, candidate, 'create')

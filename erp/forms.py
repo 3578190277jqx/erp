@@ -81,11 +81,12 @@ def document_form(module, user, data=None, instance=None, active_org=None):
     if isinstance(form.instance, m.ChangeRequest):
         if instance and instance.pk:
             form.fields['order'].disabled=True
-        form.fields['proposed_discount'].help_text='0.95 表示95折；未知历史口径须明确填写，1表示不打折。'
+        form.fields['proposed_discount'].help_text='0.95表示95折，1表示不打折。填写后将按全部产品重算合同额（包括历史金额不一致的单据），请核对原额与拟额。'
         form.fields['revise_payment_plan'].help_text='保留已收核销，按原未收比例分配新未收；原全部结清时新增未收归尾款。'
         form.fields['restore_product_snapshot'].help_text='仅用于原合同没有产品明细时；必须补录全部原产品和本次增减项。'
         form.fields['proposed_total'].required=False
-        form.fields['proposed_total'].help_text='仅金额或交期变更须填金额；填写拟更正折扣时，保存后由服务器重算，无需手算。'
+        form.fields['proposed_total'].help_text='留空沿用当前合同额；显式填写0表示申请零金额。填写折扣或增减项时由服务器按全部产品重算。'
+        if not (instance and instance.pk):form.initial['proposed_total']=None
         if not (instance and instance.pk) and data and data.get('order'):
             order = form.fields['order'].queryset.filter(pk=data.get('order')).first()
             if order:

@@ -59,6 +59,24 @@ def feature_context(request,obj):
             line.display_net=line.net_amount
             if line.display_net is None and obj.status=='pending':line.display_net=pricing.line_net(line,pricing.change_discount(obj))
         context['change_lines']=change_lines
+        if obj.status=='pending':
+            source=list(obj.order.lines.all())
+            source_total=sum((line.line_total for line in source),Decimal(0))
+            source_total+=pricing.rounded(source_total*obj.order.tax_rate)
+            summary={'old_total':obj.order.total,'new_total':obj.proposed_total,'delta':obj.proposed_total-obj.order.total,
+                     'source_count':len(source),'operation_count':len(change_lines),'restore':obj.restore_product_snapshot,
+                     'snapshot_total':source_total,'mismatch':bool(source and source_total!=obj.order.total),
+                     'reprices':bool(change_lines or obj.proposed_discount is not None)}
+            try:summary['proposed_count']=len(pricing.proposed_lines(obj))
+            except ValidationError:summary['error']='原产品已变化，请编辑重新核对后再审批。'
+            context['change_review']=summary
+            copy=(f"原合同金额 ¥{obj.order.total:,.2f} → 拟合同金额 ¥{obj.proposed_total:,.2f}。"
+                  f"原合同产品 {len(source)} 条，本次操作 {len(change_lines)} 条，拟产品 {summary.get('proposed_count','待核对')} 条。")
+            if summary['reprices']:copy+='本次将按全部拟产品重算合同金额。'
+            if summary['mismatch']:copy+='产品快照合计与合同金额不一致，请核对本次改价影响。'
+            if summary['restore']:copy+='完整性需人工核对：请确认已补录全部原产品和本次增减项。'
+            context['change_approval_copy']=copy
+
         if obj.status=='pending' and obj.revise_payment_plan and obj.proposed_total!=obj.order.total:
             rows=receivables.plan_rows(obj.order)
             try:

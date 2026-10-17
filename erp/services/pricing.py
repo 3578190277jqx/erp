@@ -53,11 +53,41 @@ def change_total(change):
     return net+rounded(net*change.order.tax_rate)
 
 
-def refresh_change_pricing(change):
-    for line in change.lines.all():
-        line.net_amount=line_net(line,change_discount(change)) if line.operation!='remove' else Decimal(0)
-        line.full_clean();line.save(update_fields=['net_amount'])
-    change.proposed_total=change_total(change)
+UNSET=object()
+
+
+def prepare_change(change, *, submitted_total=UNSET, verify=False, persist_lines=False):
+    """Prepare a proposal under its parent lock, or verify it without mutation.
+
+    Only form preparation passes submitted_total: None means carry the current
+    contract. Stored zero is never inferred to be missing at approval time.
+    """
+    order=change.order
+    has_changes=bool(change.pk and change.lines.exists())
+    has_products=order.lines.exists()
+    derived=has_changes or change.proposed_discount is not None
+    if derived:
+        total=change_total(change)
+    elif submitted_total is not UNSET:
+        total=order.total if submitted_total is None else submitted_total
+    else:
+        total=change.proposed_total
+    total=change._meta.get_field('proposed_total').clean(total,change)
+    if derived or total!=order.total:validate_pricing_basis(change)
+    if has_changes and not has_products and order.total>0 and not change.restore_product_snapshot:
+        raise ValidationError('原合同缺少产品快照，请明确完整补录全部产品，不能只填写新增费用。')
+    if has_products and not derived and total!=order.total:
+        raise ValidationError('有产品明细的订单必须通过增减项计算变更金额。')
+    if verify:
+        if change.proposed_total!=total:
+            raise ValidationError('变更总额与产品增减项不一致，请重新核对。')
+        return total
+    change.proposed_total=total
+    if persist_lines and has_changes:
+        for line in change.lines.all():
+            line.net_amount=line_net(line,change_discount(change)) if line.operation!='remove' else Decimal(0)
+            line.full_clean();line.save(update_fields=['net_amount'])
+    return total
 
 
 def proposed_lines(change):
@@ -83,9 +113,6 @@ def add_change_line(user, change, values, version):
     change = lock(user,change,'edit',version)
     if change.status != 'pending':
         raise ValidationError('已审批的变更不能修改。')
-    validate_pricing_basis(change)
-    if not change.order.lines.exists() and change.order.total>0 and not change.restore_product_snapshot:
-        raise ValidationError('原合同缺少产品快照。请勾选完整补录并录入全部产品，不能只添加新增费用。')
     allowed = {'operation','order_line',*SNAPSHOT_FIELDS}
     if set(values)-allowed:
         raise ValidationError('变更明细字段无效。')
@@ -108,7 +135,7 @@ def add_change_line(user, change, values, version):
     line.net_amount=line_net(line,change_discount(change)) if line.operation!='remove' else Decimal(0)
     line._meta.get_field('net_amount').clean(line.net_amount,line)
     line.save()
-    change.proposed_total = change_total(change)
+    prepare_change(change)
     save_version(change,version)
     audit(user,change,'add_change_line',before)
     return change
