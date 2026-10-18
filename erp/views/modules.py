@@ -92,7 +92,7 @@ def filtered(request, module):
     return qs.order_by(sorting,'-pk')
 
 
-def display_value(obj, field):
+def display_value(obj, field, *, detailed=False):
     value = getattr(obj, field, None)
     if value is None or value == '':
         return '—'
@@ -103,11 +103,12 @@ def display_value(obj, field):
     if field == 'action':
         from erp.templatetags.ui import action_name
         return action_name(value)
+    if field=='object_type' and value in MODULES:return MODULES[value].title
     if isinstance(value,bool):return '是' if value else '否'
     if isinstance(value, Decimal):
         return f'¥{value:,.2f}' if field in ('total', 'amount', 'unit_price', 'unit_cost', 'proposed_total') else f'{value:,.3f}'.rstrip('0').rstrip('.')
     if hasattr(value, 'strftime'):
-        if isinstance(value,datetime):return local_timestamp(value) or str(value)
+        if isinstance(value,datetime):return local_timestamp(value,detailed=detailed) or str(value)
         return value.strftime('%Y-%m-%d %H:%M') if field.endswith('_at') else value.strftime('%Y-%m-%d')
     return str(value)
 
@@ -181,7 +182,7 @@ def detail(request, key, pk):
     if isinstance(obj, m.AuditEvent):
         fields=[field for field in fields if field not in ('before','after')]
     fields = list(dict.fromkeys(fields))
-    info = [{'label': label(module.model, name), 'value': display_value(obj, name)} for name in fields]
+    info = [{'label': label(module.model, name), 'value': display_value(obj, name,detailed=isinstance(obj,m.AuditEvent))} for name in fields]
     context = {'module': module, 'obj': obj, 'info': info,
                'detail_title': getattr(obj, 'title', None) or getattr(obj, 'name', None) or module.singular,
                'can_edit': editable(obj) and can(request.user, module.model.module, 'edit', obj.organization_id)

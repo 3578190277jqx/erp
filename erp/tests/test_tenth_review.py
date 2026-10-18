@@ -33,10 +33,11 @@ class GovernanceOutcomeTests(TenthReviewFixture):
         self.assertIsNotNone(event.after['attachment_state']['archived_at'])
         self.assertEqual(event.after['attachment'],item.code)
         self.assertEqual(event.after['reason'],'十次误传')
-        self.assertEqual(event.after['sha256'],item.sha256)
+        self.assertEqual(event.before['attachment_state']['sha256'],item.sha256)
         rows={r['key']:r for r in self.context(event)['audit_differences']}
-        self.assertEqual(set(rows),{'附件状态快照 / 版本','附件状态快照 / 归档时间','附件状态快照 / 归档原因类别'})
-        self.assertEqual(rows['附件状态快照 / 归档时间']['before'],'未记录')
+        self.assertEqual(set(rows),{'附件状态快照 / 归档时间','附件状态快照 / 归档原因类别'})
+        self.assertEqual(len(self.context(event)['audit_technical_differences']),1)
+        self.assertEqual(rows['附件状态快照 / 归档时间']['before'],'尚未归档')
         self.assertEqual(rows['附件状态快照 / 归档原因类别']['after'],'人工停止共享')
         self.client.force_login(self.manager)
         response=self.client.get(f'/modules/handoffs/{self.handoff.pk}/')
@@ -45,7 +46,7 @@ class GovernanceOutcomeTests(TenthReviewFixture):
         self.assertEqual(shown.stop_actor,self.manager.username)
         audit_page=self.page(event)
         self.assertEqual(audit_page.status_code,200)
-        self.assertContains(audit_page,'3 项可比变化 · 5 个补充字段')
+        self.assertContains(audit_page,'2 项业务变化 · 1 项校验信息更新 · 3 个补充字段')
         self.assertContains(audit_page,'人工停止共享')
 
     def test_delete_compares_version_and_explicit_delete_time_and_keeps_flat_keys(self):
@@ -55,13 +56,14 @@ class GovernanceOutcomeTests(TenthReviewFixture):
         self.assertIn('attachment_state',event.before)
         self.assertIsNone(event.before['attachment_state']['deleted_at'])
         self.assertEqual(event.after['attachment'],item.code)
-        self.assertEqual(event.after['sha256'],item.sha256)
+        self.assertEqual(event.before['attachment_state']['sha256'],item.sha256)
         rows={r['key']:r for r in self.context(event)['audit_differences']}
-        self.assertEqual(set(rows),{'附件状态快照 / 版本','附件状态快照 / 删除时间'})
-        self.assertEqual(rows['附件状态快照 / 删除时间']['before'],'未记录')
-        self.assertEqual(rows['附件状态快照 / 版本']['before'],'1')
-        self.assertEqual(rows['附件状态快照 / 版本']['after'],'2')
-        self.assertContains(self.page(event),'2 项可比变化 · 3 个补充字段')
+        self.assertEqual(set(rows),{'附件状态快照 / 删除时间'})
+        self.assertEqual(rows['附件状态快照 / 删除时间']['before'],'尚未删除')
+        technical=self.context(event)['audit_technical_differences']
+        self.assertEqual(len(technical),1)
+        self.assertEqual(technical[0]['before'],'1');self.assertEqual(technical[0]['after'],'2')
+        self.assertContains(self.page(event),'1 项业务变化 · 1 项校验信息更新 · 1 个补充字段')
 
     def test_audit_write_failure_rolls_back_attachment_and_epoch(self):
         item=self.upload(self.receiver)
@@ -109,7 +111,7 @@ class AuditOutcomePresentationTests(TenthReviewFixture):
     def test_info_datetime_and_payload_share_timezone_without_shifting_dates(self):
         self.handoff.created_at=datetime(2026,10,18,3,44,41,tzinfo=datetime_timezone.utc)
         with timezone.override('Asia/Shanghai'):
-            self.assertEqual(display_value(self.handoff,'created_at'),'2026-10-18 11:44:41+08:00')
+            self.assertEqual(display_value(self.handoff,'created_at',detailed=True),'2026-10-18 11:44:41+08:00')
             self.assertEqual(display_value(self.source,'due_date'),self.source.due_date.strftime('%Y-%m-%d'))
 
     def test_target_alias_enriches_only_authorized_organization_names(self):

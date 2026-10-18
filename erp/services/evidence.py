@@ -206,13 +206,13 @@ def authorized_attachment(user,pk):
     raise PermissionDenied('共享范围正在变化，请刷新后重试。')
 
 
-def attachment_audit_state(item):
+def attachment_audit_state(item,fields=None):
     data=snapshot(item)
     # Ordinary snapshots omit nulls; governance needs an explicit before value.
     for key in ('archived_at','deleted_at'):
         value=getattr(item,key)
         data[key]=str(value) if value is not None else None
-    return data
+    return {key:data[key] for key in fields} if fields is not None else data
 
 
 @transaction.atomic
@@ -235,9 +235,9 @@ def stop_sharing_attachment(user,item,version,parent_version,reason):
     before={'handoff':snapshot(parent),'attachment_state':attachment_audit_state(item)}
     item.archived_at=timezone.now();item.archive_reason='stopped'
     save_version(item,expected);advance_evidence_epoch(parent)
-    audit(user,parent,'stop_sharing_attachment',before,after={'handoff':snapshot(parent),
-          'attachment_state':attachment_audit_state(item),'attachment':item.code,'reason':reason,
-          'archived_at':str(item.archived_at),'sha256':item.sha256,'policy':'文件保留，仅源门店可查阅，不自动恢复共享。'})
+    audit(user,parent,'stop_sharing_attachment',before,after={
+          'attachment_state':attachment_audit_state(item,('version','archived_at','archive_reason')),
+          'attachment':item.code,'reason':reason,'policy':'文件保留，仅源门店可查阅，不自动恢复共享。'})
     return item
 
 
@@ -268,6 +268,6 @@ def delete_attachment(user,item,version):
     before={'attachment_state':attachment_audit_state(item)}
     item.deleted_at=timezone.now();save_version(item,expected)
     advance_evidence_epoch(parent)
-    audit(user,parent,'delete_attachment',before=before,after={'attachment_state':attachment_audit_state(item),
-          'attachment':item.code,'sha256':item.sha256,'deleted_at':str(item.deleted_at)})
+    audit(user,parent,'delete_attachment',before=before,after={
+          'attachment_state':attachment_audit_state(item,('version','deleted_at')),'attachment':item.code})
     transaction.on_commit(lambda:purge_attachment_file(item.pk))

@@ -25,14 +25,15 @@ class AuditPayloadSemanticsTests(EighthReviewFixture):
         event=m.AuditEvent.objects.get(action='stop_sharing_attachment')
         context=self.context(event)
         self.assertEqual({r['key'] for r in context['audit_differences']},
-                         {'附件状态快照 / 版本','附件状态快照 / 归档时间','附件状态快照 / 归档原因类别'})
+                         {'附件状态快照 / 归档时间','附件状态快照 / 归档原因类别'})
+        self.assertEqual(len(context['audit_technical_differences']),1)
         recorded={r['key']:r['value'] for r in context['audit_recorded_fields'] if r['stage']=='变更后'}
-        self.assertEqual(set(recorded),{'附件编号','停止原因','停止共享时间','文件校验和','处理规则'})
+        self.assertEqual(set(recorded),{'附件编号','停止原因','处理规则'})
         self.assertEqual(recorded['附件编号'],item.code)
         self.assertEqual(recorded['停止原因'],'误传')
         self.assertEqual(self.handoff.code,event.before['handoff']['code'])
         response=self.page(event)
-        self.assertContains(response,'未记录字段不代表被清空')
+        self.assertContains(response,'缺少键表示未记录')
         self.assertNotContains(response,'未记录此字段')
         event.refresh_from_db();self.assertEqual(event.after['reason'],'误传')
 
@@ -42,8 +43,9 @@ class AuditPayloadSemanticsTests(EighthReviewFixture):
         event=m.AuditEvent.objects.get(action='delete_attachment')
         context=self.context(event)
         self.assertEqual({r['key'] for r in context['audit_differences']},
-                         {'附件状态快照 / 版本','附件状态快照 / 删除时间'})
-        self.assertIn('删除时间',{r['key'] for r in context['audit_recorded_fields']})
+                         {'附件状态快照 / 删除时间'})
+        self.assertEqual(len(context['audit_technical_differences']),1)
+        self.assertNotIn('删除时间',{r['key'] for r in context['audit_recorded_fields']})
         item.refresh_from_db();self.assertIsNotNone(item.deleted_at)
 
     def test_real_remove_line_compares_change_and_keeps_removed_line_as_evidence(self):
@@ -84,7 +86,7 @@ class AuditPayloadSemanticsTests(EighthReviewFixture):
         single={(r['stage'],r['key']):r['value'] for r in context['audit_recorded_fields']}
         self.assertEqual(single[('变更前','备注 / 处理结论')],'旧')
         self.assertEqual(single[('变更前','交接快照 / 单据编号')],'旧号')
-        self.assertEqual(single[('变更后','new_value')],'未记录')
+        self.assertEqual(single[('变更后','new_value')],'空值（null）')
 
     def test_shape_change_is_recorded_without_inferred_leaf_removals(self):
         context=self.context(self.event({'attachment':{'code':'A','organization':str(self.org.pk)}}, {'attachment':'A'}))
@@ -120,7 +122,7 @@ class AuditPayloadSemanticsTests(EighthReviewFixture):
         context=self.context(self.event({'nullable':None,'flag':False,'zero':0,'lines':[], 'custom':{}},
                                        {'nullable':'','flag':0,'zero':False,'lines':[{'name':'柜体'}], 'custom':{'note':'已记'}}))
         rows={r['key']:r for r in context['audit_differences']}
-        self.assertEqual(rows['nullable']['before'],'未记录');self.assertEqual(rows['nullable']['after'],'未填写')
+        self.assertEqual(rows['nullable']['before'],'空值（null）');self.assertEqual(rows['nullable']['after'],'未填写')
         self.assertEqual(rows['flag']['before'],'否');self.assertEqual(rows['flag']['after'],'0')
         self.assertEqual(rows['zero']['before'],'0');self.assertEqual(rows['zero']['after'],'否')
         self.assertEqual(rows['产品明细']['before'],'0 条（无条目）')

@@ -161,10 +161,10 @@ class AuditPresentationTests(EighthReviewFixture):
         response=self.page(event);self.assertIn('audit_differences',response.context)
         rows={r['key']:r for r in response.context['audit_differences']}
         self.assertEqual(rows['备注 / 处理结论']['after'],'未填写')
-        self.assertEqual(rows['nullable']['before'],'未记录');self.assertEqual(rows['nullable']['after'],'未填写')
+        self.assertEqual(rows['nullable']['before'],'空值（null）');self.assertEqual(rows['nullable']['after'],'未填写')
         recorded={r['key']:r for r in response.context['audit_recorded_fields']}
         self.assertEqual(recorded['new_value']['stage'],'变更后')
-        self.assertEqual(recorded['new_value']['value'],'未记录')
+        self.assertEqual(recorded['new_value']['value'],'空值（null）')
         self.assertNotIn('new_value',rows)
         self.assertEqual(rows['管理员例外上传']['before'],'否');self.assertEqual(rows['管理员例外上传']['after'],'0')
         self.assertEqual(rows['count']['before'],'0');self.assertEqual(rows['count']['after'],'否')

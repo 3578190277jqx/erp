@@ -1,6 +1,6 @@
 {% if audit_payloads %}
 <section class="panel audit-panel" aria-label="审计记录内容">
-  <div class="panel-heading"><div><h2>{{ audit_heading }}</h2><p>仅比较两侧均有记录且结构可比的字段；未记录字段不代表被清空。完整快照与原始记录可在下方查看。</p></div><span class="subtle">{{ audit_summary }}</span></div>
+  <div class="panel-heading"><div><h2>{{ audit_heading }}</h2><p>缺少键表示未记录，不代表字段被清空；空值表示操作时实际状态。业务变化、单侧记录及共同上下文分别展示，完整快照保留在原始 JSON。</p></div><span class="subtle">{{ audit_summary }}</span></div>
   <p class="audit-reference-note subtle">关联名称为当前可见资料，不代表操作当时的名称；原始 ID 始终保留。</p>
   {% if audit_is_write %}
   <div class="table-scroll"><table class="data-table"><thead><tr><th>字段</th><th>写入内容</th></tr></thead><tbody>
@@ -9,11 +9,19 @@
   </tbody></table></div>
   {% elif audit_differences %}
   <div class="audit-differences">{% for row in audit_differences %}
-    <div class="audit-diff-row"><h3>{{ row.key }}</h3><div class="audit-diff-values"><div><small>变更前</small><pre class="audit-value">{{ row.before }}</pre></div><div><small>变更后</small><pre class="audit-value">{{ row.after }}</pre></div></div></div>
+    <div class="audit-diff-row"><h3>{{ row.key }}</h3><div class="audit-diff-values"><div><small>变更前</small><pre class="audit-value">{{ row.before }}</pre></div><div><small>变更后</small><pre class="audit-value">{{ row.after }}</pre></div></div>{% if row.note %}<p class="subtle">{{ row.note }}</p>{% endif %}</div>
   {% endfor %}</div>
   {% elif audit_recorded_fields %}<p class="feature-empty">本次操作记录见下方；历史载荷结构不同，不据此推断字段增删。</p>
+  {% elif audit_technical_differences %}<p class="feature-empty">本次仅更新并发校验信息，业务字段未变。</p>
   {% else %}<p class="feature-empty">本次记录没有字段值变化。</p>{% endif %}
 </section>
+{% if audit_technical_differences %}
+<details class="panel audit-panel audit-snapshot"><summary>并发校验信息 · {{ audit_technical_differences|length }} 项（不计业务变化）</summary>
+  <div class="table-scroll"><table class="data-table"><thead><tr><th>字段</th><th>变更前</th><th>变更后</th></tr></thead><tbody>
+    {% for row in audit_technical_differences %}<tr><th scope="row">{{ row.key }}</th><td><pre class="audit-value">{{ row.before }}</pre></td><td><pre class="audit-value">{{ row.after }}</pre></td></tr>{% endfor %}
+  </tbody></table></div>
+</details>
+{% endif %}
 {% if not audit_is_write %}{% for payload in audit_recorded_payloads %}{% if payload.rows %}
 <details class="panel audit-panel audit-snapshot" {% if payload.title == '变更后' %}open{% endif %}>
   <summary>仅{{ payload.title }}记录的内容 · {{ payload.rows|length }} 个字段{% if payload.complete %} · 已含完整{{ payload.title }}快照{% endif %}</summary>
@@ -22,11 +30,18 @@
   </table></div>
 </details>
 {% endif %}{% endfor %}{% endif %}
+{% if audit_shared_rows %}
+<details class="panel audit-panel audit-snapshot"><summary>共同上下文 · {{ audit_shared_rows|length }} 个同值字段（两侧均有记录）</summary>
+  <div class="table-scroll"><table class="data-table"><thead><tr><th>字段</th><th>两侧相同内容</th></tr></thead><tbody>
+    {% for row in audit_shared_rows %}<tr><th scope="row">{{ row.key }}</th><td><pre class="audit-value">{{ row.value }}</pre></td></tr>{% endfor %}
+  </tbody></table></div>
+</details>
+{% endif %}
 {% for payload in audit_payloads %}{% if payload.show %}
 <details class="panel audit-panel audit-snapshot">
-  <summary>完整{{ payload.title }}快照</summary>
+  <summary>{% if payload.partial %}其余{{ payload.title }}快照字段{% else %}完整{{ payload.title }}快照{% endif %}</summary>
   <div class="table-scroll"><table class="data-table"><thead><tr><th>字段</th><th>记录内容</th></tr></thead>
-  <tbody>{% for row in payload.rows %}<tr><th scope="row">{{ row.key }}</th><td><pre class="audit-value">{{ row.value }}</pre></td></tr>
+  <tbody>{% for row in payload.render_rows %}<tr><th scope="row">{{ row.key }}</th><td><pre class="audit-value">{{ row.value }}</pre></td></tr>
   {% empty %}<tr><td colspan="2" class="table-empty">未记录此阶段快照</td></tr>{% endfor %}</tbody></table></div>
 </details>
 {% endif %}{% endfor %}
