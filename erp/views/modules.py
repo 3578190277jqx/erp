@@ -1,4 +1,5 @@
 import csv
+import json
 from decimal import Decimal
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -176,7 +177,7 @@ def detail(request, key, pk):
     if isinstance(obj, m.ChangeRequest):
         fields.append('requested_by')
     if isinstance(obj, m.AuditEvent):
-        fields.extend(['before', 'after'])
+        fields=[field for field in fields if field not in ('before','after')]
     fields = list(dict.fromkeys(fields))
     info = [{'label': label(module.model, name), 'value': display_value(obj, name)} for name in fields]
     context = {'module': module, 'obj': obj, 'info': info,
@@ -185,6 +186,16 @@ def detail(request, key, pk):
                            and scoped(request.user, module.model, action='edit').filter(pk=obj.pk).exists(),
                'actions': [(a, text) for a, text in available_actions(obj) if scoped(request.user, module.model, action=a).filter(pk=obj.pk).exists()] if hasattr(obj, 'status') else [],
                'events': m.AuditEvent.objects.filter(organization=obj.organization, code=obj.code).order_by('-created_at','-pk')[:12]}
+    if isinstance(obj,m.AuditEvent):
+        payload_labels={'reason':'停止原因','attachment':'附件编号','sha256':'文件校验和','policy':'处理规则',
+            'recalculated_against_order_version':'拟额计算订单版本','attempted_order_version':'尝试计算订单版本',
+            'recalculation_error':'重算未完成原因','change':'变更申请快照'}
+        context['audit_payloads']=[]
+        for title,value in [('变更前',obj.before),('变更后',obj.after)]:
+            values=value if isinstance(value,dict) else {'内容':value}
+            context['audit_payloads'].append({'title':title,'rows':[{'key':payload_labels.get(str(k),str(k)),
+                'value':json.dumps(v,ensure_ascii=False,indent=2,default=str) if isinstance(v,(dict,list))
+                    else '未完成 / 未记录' if v is None else str(v)} for k,v in values.items()]})
     if isinstance(obj,m.Handoff):
         from erp.services.collaboration import handoff_actions
         context['actions']=handoff_actions(request.user,obj)
@@ -225,7 +236,7 @@ def detail(request, key, pk):
     context.update(feature_context(request,obj))
     if isinstance(obj,m.ChangeRequest) and obj.status=='pending' and any(a=='approve' for a,_ in context['actions']):
         from erp.services.workflows import validate_change_approval
-        try:validate_change_approval(request.user,obj)
+        try:validate_change_approval(request.user,obj,pricing_snapshot=context.get('_pricing_snapshot'))
         except ValidationError as exc:
             context['change_approval_blocker']='；'.join(exc.messages)
             context['actions']=[(a,t) for a,t in context['actions'] if a!='approve']
@@ -234,6 +245,11 @@ def detail(request, key, pk):
         if context.get('change_review',{}).get('error'):
             for field in context['info']:
                 if field['label']==label(m.ChangeRequest,'proposed_total'):field['value']='待核对：移除失效行后重新计算'
+    events=list(context['events'])
+    permitted=set(scoped(request.user,m.AuditEvent).filter(pk__in=[event.pk for event in events]).values_list('pk',flat=True)) \
+               if events and can(request.user,'audit','view',obj.organization_id) else set()
+    for event in events:event.can_view_payload=event.pk in permitted
+    context['events']=events
     return render(request, 'erp/detail.html', context)
 
 

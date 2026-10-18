@@ -134,7 +134,8 @@ class ApprovalConsistencyTests(ERPTestCase):
                   object_id=change.pk,code=change.code,action=action)
 
     def test_ui_matches_each_server_approval_blocker(self):
-        cases=('applicant','editor','factory','version','status','received','plan','plan_sum','handoff','pricing','breakdown')
+        cases=('applicant','editor','factory','version','status','received','plan','plan_sum','handoff','pricing','breakdown',
+               'unknown_basis','restore','total_mismatch','missing_target','duplicate_target')
         factory=m.Organization.objects.create(name='审批工厂',kind='factory')
         m.Membership.objects.create(user=self.manager,organization=factory,role='manager',scope='org')
         for case in cases:
@@ -165,6 +166,19 @@ class ApprovalConsistencyTests(ERPTestCase):
                     else:
                         change.proposed_discount=1
                         self.make(m.Breakdown,order=order)
+                if case=='unknown_basis':
+                    order.discount_confirmed=False;order.save();change.proposed_total=1100
+                if case=='restore':
+                    m.ChangeLine.objects.create(change=change,operation='add',name='补录一部分',quantity=1,unit_price=100)
+                    change.proposed_total=100
+                if case in ('total_mismatch','missing_target','duplicate_target'):
+                    product=m.OrderLine.objects.create(order=order,name='柜体',quantity=1,unit_price=1000,line_total=1000)
+                    if case=='total_mismatch':
+                        m.ChangeLine.objects.create(change=change,operation='add',name='新增',quantity=1,unit_price=200)
+                        change.proposed_total=1100
+                    elif case=='missing_target':m.ChangeLine.objects.create(change=change,operation='remove')
+                    else:
+                        for _ in range(2):m.ChangeLine.objects.create(change=change,operation='remove',order_line=product)
                 change.save()
                 with self.assertRaises(ValidationError) as blocked:services.transition(self.manager,change,'approve',change.version)
                 self.client.force_login(self.manager);response=self.client.get(f'/modules/changes/{change.pk}/')

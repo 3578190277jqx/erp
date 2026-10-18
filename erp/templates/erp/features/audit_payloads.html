@@ -1,0 +1,10 @@
+{% if audit_payloads %}
+{% for payload in audit_payloads %}
+<section class="panel" aria-label="审计{{ payload.title }}">
+  <div class="panel-heading"><h2>{{ payload.title }}</h2><span class="subtle">只读审计快照</span></div>
+  <div class="table-scroll"><table class="data-table"><thead><tr><th>字段</th><th>记录内容</th></tr></thead>
+  <tbody>{% for row in payload.rows %}<tr><th scope="row">{{ row.key }}</th><td><pre class="audit-value">{{ row.value }}</pre></td></tr>
+  {% empty %}<tr><td colspan="2" class="table-empty">未记录此阶段快照</td></tr>{% endfor %}</tbody></table></div>
+</section>
+{% endfor %}
+{% endif %}

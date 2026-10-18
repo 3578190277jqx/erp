@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Sum
 from erp import models as m
 from .common import lock, snapshot, save_version, audit, system_update
 from .stock import receive_purchase, issue_production
@@ -99,7 +100,7 @@ def prerequisites(user, obj, action, note):
         validate_change_approval(user,obj,order)
 
 
-def validate_change_approval(user,obj,order=None):
+def validate_change_approval(user,obj,order=None,*,pricing_snapshot=None):
     """Read-only preview and locked POST use the same business guards."""
     last_editor = m.AuditEvent.objects.filter(object_type='changes', object_id=obj.pk,
                   action__in=('edit','add_change_line','remove_change_line')).order_by('-pk').first()
@@ -115,19 +116,23 @@ def validate_change_approval(user,obj,order=None):
         raise ValidationError('订单版本已变化，请移除失效行并编辑重新核对后再审批。')
     if order.status not in ('confirmed', 'producing', 'ready', 'shipping', 'installing'):
         raise ValidationError('当前订单状态不允许变更。')
-    received = sum((p.amount for p in order.payment_set.all()), 0)
+    received = order.payment_set.aggregate(total=Sum('amount'))['total'] or 0
     if obj.proposed_total < received:
         raise ValidationError('变更金额不能少于已收款。')
-    if obj.proposed_total != order.total and order.payment_plans.exists() and not obj.revise_payment_plan:
+    plans=list(order.payment_plans.all()) if obj.proposed_total!=order.total else []
+    if plans and not obj.revise_payment_plan:
         raise ValidationError('请在申请中勾选同步修订分期，系统将保留已收核销并重排未收金额。')
-    if obj.proposed_total != order.total and order.payment_plans.exists():
-        if sum((p.amount for p in order.payment_plans.all()),0)!=order.total:
+    if plans:
+        if sum((p.amount for p in plans),0)!=order.total:
             raise ValidationError('现有分期与原合同金额不一致，请先财务核对。')
     if m.Handoff.objects.filter(order=order,status__in=['sent','accepted','completed']).exists():
         raise ValidationError('订单已交接工厂，请先解决交接后再修改。')
-    from .pricing import prepare_change
-    prepare_change(obj,verify=True)
-    if obj.lines.exists() or obj.proposed_discount is not None:
+    from .pricing import prepare_change,snapshot_change
+    # Only the read-only GET caller supplies a snapshot. POST prerequisites
+    # deliberately call without one and rebuild from locked current rows.
+    review=pricing_snapshot or snapshot_change(obj)
+    prepare_change(obj,verify=True,pricing_snapshot=review)
+    if review.change_lines or obj.proposed_discount is not None:
         if m.Breakdown.objects.filter(order=order).exists():
             raise ValidationError('订单已进入拆单，不能直接修改产品，请先处理生产变更。')
 

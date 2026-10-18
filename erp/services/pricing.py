@@ -1,5 +1,6 @@
 """Explicit commercial amounts. No browser-calculated totals are trusted."""
 from decimal import Decimal, ROUND_HALF_UP
+from dataclasses import dataclass
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from erp import models as m
@@ -44,30 +45,64 @@ def validate_pricing_basis(change):
         raise ValidationError('历史合同折扣口径未知，请在变更申请中明确拟采用折扣并经审批核对。')
 
 
-def change_total(change):
+def _preview_key(change):
+    order=change.order
+    return (change.pk,change.version,order.pk,order.version,change.proposed_total,change.proposed_discount,
+            change.restore_product_snapshot,order.total,order.discount,order.tax_rate,order.discount_confirmed)
+
+
+@dataclass(frozen=True)
+class ChangePricingSnapshot:
+    key: tuple
+    source_lines: tuple
+    change_lines: tuple
+    _proposed: dict | None
+    _error: ValidationError | None
+
+    def check(self,change):
+        if self.key!=_preview_key(change):raise ValidationError('计价快照与当前申请不一致，请刷新重新核对。')
+
+    def proposed(self):
+        if self._error is not None:raise self._error
+        return self._proposed
+
+
+def snapshot_change(change):
+    """Request-local calculation only; write callers rebuild under their locks."""
+    source=tuple(change.order.lines.all())
+    changes=tuple(change.lines.select_related('order_line').all()) if change.pk else ()
+    result=error=None
+    try:result=proposed_lines(change,source_lines=source,change_lines=changes)
+    except ValidationError as exc:error=exc
+    return ChangePricingSnapshot(_preview_key(change),source,changes,result,error)
+
+
+def change_total(change,*,pricing_snapshot=None):
     # A discount declaration without any product evidence cannot reconstruct a
     # historical contract amount. Preserve that header until a full restore.
-    if not change.order.lines.exists() and not (change.pk and change.lines.exists()):
+    review=pricing_snapshot or snapshot_change(change);review.check(change)
+    if not review.source_lines and not review.change_lines:
         return change.order.total
-    net=sum((line['line_total'] for line in proposed_lines(change).values()),Decimal(0))
+    net=sum((line['line_total'] for line in review.proposed().values()),Decimal(0))
     return net+rounded(net*change.order.tax_rate)
 
 
 UNSET=object()
 
 
-def prepare_change(change, *, submitted_total=UNSET, verify=False, persist_lines=False):
+def prepare_change(change, *, submitted_total=UNSET, verify=False, persist_lines=False,pricing_snapshot=None):
     """Prepare a proposal under its parent lock, or verify it without mutation.
 
     Only form preparation passes submitted_total: None means carry the current
     contract. Stored zero is never inferred to be missing at approval time.
     """
     order=change.order
-    has_changes=bool(change.pk and change.lines.exists())
-    has_products=order.lines.exists()
+    review=pricing_snapshot or snapshot_change(change);review.check(change)
+    has_changes=bool(review.change_lines)
+    has_products=bool(review.source_lines)
     derived=has_changes or change.proposed_discount is not None
     if derived:
-        total=change_total(change)
+        total=change_total(change,pricing_snapshot=review)
     elif submitted_total is not UNSET:
         total=order.total if submitted_total is None else submitted_total
     else:
@@ -84,19 +119,21 @@ def prepare_change(change, *, submitted_total=UNSET, verify=False, persist_lines
         return total
     change.proposed_total=total
     if persist_lines and has_changes:
-        for line in change.lines.all():
+        for line in review.change_lines:
             line.net_amount=line_net(line,change_discount(change)) if line.operation!='remove' else Decimal(0)
             line.full_clean();line.save(update_fields=['net_amount'])
     return total
 
 
-def proposed_lines(change):
+def proposed_lines(change,*,source_lines=None,change_lines=None):
+    source_lines=tuple(change.order.lines.all()) if source_lines is None else source_lines
+    change_lines=(change.lines.all() if change.pk else ()) if change_lines is None else change_lines
     lines = {line.pk:{field:getattr(line,field) for field in SNAPSHOT_FIELDS} | {'line_total':line.line_total}
-             for line in change.order.lines.all()}
+             for line in source_lines}
     if change.proposed_discount is not None:
-        for current in change.order.lines.all():lines[current.pk]['line_total']=line_net(current,change.proposed_discount)
+        for current in source_lines:lines[current.pk]['line_total']=line_net(current,change.proposed_discount)
     source_ids=set(lines)
-    for line in (change.lines.all() if change.pk else []):
+    for line in change_lines:
         if line.operation in ('update','remove') and line.order_line_id not in lines:
             if line.order_line_id not in source_ids:
                 raise ValidationError('原产品已被删除，请移除对应变更行。',code='missing_source_line')

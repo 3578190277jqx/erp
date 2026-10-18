@@ -54,13 +54,15 @@ def feature_context(request,obj):
         context['can_revision']=scoped(request.user,m.Design,action='edit').filter(pk=obj.pk).exists()
         context['design_versions']=scoped(request.user,m.Design).filter(family_id=obj.family_id).order_by('-revision')[:20]
     if isinstance(obj,m.ChangeRequest):
-        change_lines=list(obj.lines.select_related('order_line').all())
+        review=pricing.snapshot_change(obj) if obj.status=='pending' else None
+        change_lines=list(review.change_lines) if review else list(obj.lines.select_related('order_line').all())
         for line in change_lines:
             line.display_net=line.net_amount
             if line.display_net is None and obj.status=='pending':line.display_net=pricing.line_net(line,pricing.change_discount(obj))
         context['change_lines']=change_lines
         if obj.status=='pending':
-            source=list(obj.order.lines.all())
+            source=review.source_lines
+            context['_pricing_snapshot']=review
             source_total=sum((line.line_total for line in source),Decimal(0))
             source_total+=pricing.rounded(source_total*obj.order.tax_rate)
             summary={'old_total':obj.order.total,'new_total':obj.proposed_total,'delta':obj.proposed_total-obj.order.total,
@@ -68,7 +70,7 @@ def feature_context(request,obj):
                      'snapshot_total':source_total,'mismatch':bool(source and source_total!=obj.order.total),
                      'reprices':bool(change_lines or obj.proposed_discount is not None)}
             summary['proposed_count']=None
-            try:summary['proposed_count']=len(pricing.proposed_lines(obj))
+            try:summary['proposed_count']=len(review.proposed())
             except ValidationError as exc:summary['error']='；'.join(exc.messages)
             delta=summary['delta']
             summary['delta_display']=f'+¥{delta:,.2f}' if delta>0 else f'−¥{-delta:,.2f}' if delta<0 else '¥0.00'
@@ -90,7 +92,8 @@ def feature_context(request,obj):
 
         form=ChangeLineForm(request.user,obj)
         fields=[name for name in pricing.SNAPSHOT_FIELDS if name in form.fields]
-        context['change_source_lines']={str(line.pk):{name:str(getattr(line,name)) for name in fields} for line in obj.order.lines.all()}
+        context['change_source_lines']={str(line.pk):{name:str(getattr(line,name)) for name in fields}
+                       for line in (review.source_lines if review else obj.order.lines.all())}
         context['change_form']=form
         context['can_change_lines']=obj.status=='pending' and scoped(request.user,m.ChangeRequest,action='edit').filter(pk=obj.pk).exists()
     if obj.module in evidence.PARENTS:
@@ -100,7 +103,21 @@ def feature_context(request,obj):
             item.can_stop_sharing=evidence.can_stop_sharing(request.user,obj,item,rights)
             item.stop_share_label=('停止向工厂共享' if rights.archived_read else
                                   '撤回我的文件' if item.owner_id==request.user.pk else '停止本厂文件共享')
+        if rights.archived_read:
+            codes=[item.code for item in context['attachments'] if item.archived_at]
+            events=m.AuditEvent.objects.filter(organization=obj.organization,object_type=obj.module,object_id=obj.pk,
+                 action='stop_sharing_attachment',after__attachment__in=codes).select_related('owner').order_by('-pk') if codes else []
+            stopped={}
+            for event in events:
+                if isinstance(event.after,dict):stopped.setdefault(event.after.get('attachment'),event)
+            for item in context['attachments']:
+                event=stopped.get(item.code)
+                if event:
+                    item.stop_reason=str(event.after.get('reason',''))
+                    item.stop_actor=event.owner.first_name or event.owner.username
+                    item.stopped_at=event.created_at
         context['can_attach']=rights.upload
+        context['upload_route_override']=isinstance(obj,m.Handoff) and context.get('route_inactive') and rights.upload
         context['shared_evidence']=isinstance(obj,m.Handoff)
     context['today_iso']=str(timezone.localdate())
     return context
