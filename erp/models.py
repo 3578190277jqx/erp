@@ -516,6 +516,7 @@ class EvidenceState(models.Model):
     object_type = models.CharField(max_length=30)
     object_id = models.PositiveBigIntegerField()
     epoch = models.PositiveBigIntegerField(default=0)
+    updated_at = models.DateTimeField('最近附件变更时间',null=True,blank=True,editable=False)
 
     class Meta:
         constraints=[models.UniqueConstraint(fields=['object_type','object_id'],name='unique_parent_evidence_state')]

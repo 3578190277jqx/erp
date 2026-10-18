@@ -122,7 +122,7 @@ class SharingTests(ERPTestCase):
     def test_readers_do_not_take_parent_write_locks(self):
         item=self.upload()
         with patch.object(m.Handoff.objects,'select_for_update',side_effect=AssertionError('GET must not lock')):
-            self.assertEqual(len(evidence.visible_attachments(self.receiver,self.handoff)),1)
+            self.assertEqual(len(evidence.attachment_context(self.receiver,self.handoff)[0]),1)
             self.assertEqual(evidence.authorized_attachment(self.receiver,item.pk).pk,item.pk)
 
     def test_continuously_changing_parent_is_denied_instead_of_using_stale_scope(self):

@@ -252,6 +252,9 @@ class ExpandedEvidenceTests(ERPTestCase):
         other=m.Organization.objects.create(name='另一工厂',kind='factory')
         m.CollaborationRoute.objects.create(source=order.organization,target=other)
         collaboration.send_handoff(self.admin,order,other,order.version,handoff_version=handoff.version)
+        # The endpoint loads the current parent, while an old form still sends
+        # the previous version/target. Isolate that guard from lifecycle denial.
+        handoff.refresh_from_db()
         with TemporaryDirectory() as folder,override_settings(MEDIA_ROOT=folder):
             with self.assertRaises(ValidationError):
                 evidence.upload_attachment(self.sales,handoff,SimpleUploadedFile('旧厂图纸.pdf',b'%PDF-1.7 fixture'),'drawing',

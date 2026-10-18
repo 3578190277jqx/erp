@@ -6,7 +6,7 @@ from django.test import TransactionTestCase
 
 
 class HistoricalUpgradeTests(TransactionTestCase):
-    latest=('erp','0019_evidence_epochs_and_upload_origin')
+    latest=('erp','0020_evidence_state_updated_at')
 
     def tearDown(self):
         MigrationExecutor(connection).migrate([self.latest])
@@ -117,3 +117,14 @@ class HistoricalUpgradeTests(TransactionTestCase):
         self.assertTrue(all(i.sha256=='a'*64 and i.deleted_at is None for i in fresh))
         self.assertTrue(all(i.uploaded_from_organization_id is None for i in fresh))
         self.assertEqual(m.EvidenceState.objects.count(),0)
+
+    def test_v116_epoch_upgrade_does_not_invent_historical_mutation_time(self):
+        old=('erp','0019_evidence_epochs_and_upload_origin')
+        executor=MigrationExecutor(connection);executor.migrate([old]);apps=executor.loader.project_state([old]).apps
+        org=apps.get_model('erp','Organization').objects.create(name='已有附件状态')
+        state=apps.get_model('erp','EvidenceState').objects.create(organization=org,object_type='handoffs',object_id=71,epoch=6)
+        MigrationExecutor(connection).migrate([self.latest])
+        from erp import models as m
+        fresh=m.EvidenceState.objects.get(pk=state.pk)
+        self.assertEqual((fresh.organization_id,fresh.object_type,fresh.object_id,fresh.epoch),(org.pk,'handoffs',71,6))
+        self.assertIsNone(fresh.updated_at)

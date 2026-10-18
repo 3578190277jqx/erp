@@ -39,3 +39,6 @@
 
 /* Scoped evidence reasons and immutable audit snapshots. */
 .attachment-stop-note{padding:12px 0 18px;overflow-wrap:anywhere}.attachment-stop-note small{color:var(--muted)}.audit-value{margin:0;background:transparent;color:var(--text);font:inherit;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;max-width:100%}
+
+.audit-reference-note{padding:0 24px 18px;margin:0;line-height:1.7}.audit-diff-row{padding:20px 24px;border-top:1px solid var(--line)}.audit-diff-row h3{font-size:14px;margin:0 0 14px;overflow-wrap:anywhere}.audit-diff-values{display:grid;grid-template-columns:1fr 1fr;gap:24px}.audit-diff-values>div{min-width:0}.audit-diff-values small{display:block;color:var(--muted);margin-bottom:8px}.audit-snapshot>summary{padding:20px 24px;min-height:44px;cursor:pointer;font-weight:600}.audit-snapshot .data-table{table-layout:fixed;min-width:0;width:100%}.audit-snapshot th{white-space:normal;overflow-wrap:anywhere}.audit-raw{padding:0 24px 24px}.audit-panel{margin-bottom:20px}
+@media(max-width:600px){.audit-diff-values{grid-template-columns:1fr;gap:16px}.audit-diff-row{padding:18px}.audit-reference-note{padding:0 18px 18px}.audit-snapshot>summary{padding:18px}.audit-snapshot .data-table th,.audit-snapshot .data-table td{padding:12px;font-size:13px}.audit-raw{padding:0 18px 18px}}

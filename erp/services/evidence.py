@@ -60,7 +60,8 @@ def evidence_permissions(user,parent):
             for member in memberships(user))
         factory_manage=any(member.role in ('boss','manager') and member.scope!='own'
             and parent.target_organization_id in member_orgs(member) for member in memberships(user))
-        return EvidencePermissions(True,write,source_read,manage,upload=write and enabled,
+        return EvidencePermissions(True,write,source_read,manage,
+                                   upload=write and enabled and parent.status in ('sent','accepted','completed'),
                                    receiver_stop=receiver_actor,manage_factory_sharing=factory_manage)
     if isinstance(parent,m.PurchaseReceipt):
         write=scoped(user,m.Purchase,action='receive').filter(pk=parent.purchase_id).exists()
@@ -71,10 +72,6 @@ def evidence_permissions(user,parent):
 
 def can_write_evidence(user,parent):
     return evidence_permissions(user,parent).write
-
-
-def can_view_archived_evidence(user,parent):
-    return evidence_permissions(user,parent).archived_read
 
 
 def can_delete_evidence(user,parent,item,permissions=None):
@@ -97,7 +94,7 @@ def require_evidence_write(user,parent):
 
 
 def require_evidence_upload(user,parent):
-    if not evidence_permissions(user,parent).upload:raise PermissionDenied('没有附件上传权，或协作已暂停新增共享。')
+    if not evidence_permissions(user,parent).upload:raise PermissionDenied('没有附件上传权，协作已暂停或交接需重新发送。')
 
 
 def evidence_epoch(parent):
@@ -110,7 +107,7 @@ def advance_evidence_epoch(parent):
     state,_=m.EvidenceState.objects.get_or_create(object_type=parent.module,object_id=parent.pk,
                       defaults={'organization_id':parent.organization_id})
     if state.organization_id!=parent.organization_id:raise PermissionDenied('附件版本所属组织不匹配。')
-    if m.EvidenceState.objects.filter(pk=state.pk,epoch=state.epoch).update(epoch=F('epoch')+1)!=1:
+    if m.EvidenceState.objects.filter(pk=state.pk,epoch=state.epoch).update(epoch=F('epoch')+1,updated_at=timezone.now())!=1:
         raise ValidationError('附件集合已变化，请刷新后重试。')
 
 
@@ -151,7 +148,11 @@ def upload_attachment(user,parent,file,kind,share_confirmed=False,parent_version
             item.full_clean(exclude=['code'])
             item.save()
             advance_evidence_epoch(parent)
-            audit(user,parent,'upload_attachment',after={'attachment':item.code,'name':name,'sha256':item.sha256})
+            payload={'attachment':item.code,'name':name,'sha256':item.sha256}
+            if isinstance(parent,m.Handoff) and user.is_superuser and not m.CollaborationRoute.objects.filter(
+                    source_id=parent.organization_id,target_id=parent.target_organization_id,enabled=True).exists():
+                payload['route_override']=True
+            audit(user,parent,'upload_attachment',after=payload)
     except Exception:
         if item.file.name:
             item.file.delete(save=False)
@@ -160,6 +161,8 @@ def upload_attachment(user,parent,file,kind,share_confirmed=False,parent_version
 
 
 def _same_version(parent):
+    # Re-read after metadata/permissions: using the initial epoch here would
+    # miss a stop/delete committed while this request was reading the files.
     return (type(parent).objects.filter(pk=parent.pk,version=parent.version).exists()
             and evidence_epoch(parent)==parent._evidence_epoch)
 
@@ -178,10 +181,6 @@ def attachment_context(user,parent):
     files=list(files)
     if _same_version(current):return files,rights,False
     return [],EvidencePermissions(),True
-
-
-def visible_attachments(user,parent):
-    return attachment_context(user,parent)[0]
 
 
 def authorized_attachment(user,pk):
