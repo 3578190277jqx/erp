@@ -15,7 +15,7 @@ LABELS = {
     'attempted_order_version':'尝试计算订单版本','recalculation_error':'重算未完成原因',
     'change':'变更申请快照','handoff':'交接快照','handoffs':'交接快照',
     'route_override':'管理员例外上传','target':'目标工厂','source_code':'源订单编号',
-    'source_version':'源订单版本','lines':'产品明细','id':'记录 ID',
+    'source_version':'源订单版本','lines':'产品明细','id':'记录 ID','name':'名称',
     'line':'申请明细快照',
 }
 WRAPPERS = {'change':m.ChangeRequest,'handoff':m.Handoff,'handoffs':m.Handoff,

@@ -1,3 +1,37 @@
+# 验证记录 · v1.1.7 八次评审修正
+
+2026-10-18，功能提交 `dbba233`。**205用例**：SQLite196通过/9个PG专用跳过；PostgreSQL204通过/1个SQLite备份专用跳过。Ubuntu/Windows×Python3.12/3.13、PostgreSQL16五组全绿：[功能CI与实际日志](https://github.com/3578190277jqx/erp/actions/runs/39110742367)。最终文档、截图和名称标签收尾提交以[原PR Checks](https://github.com/3578190277jqx/erp/pull/1/checks)为准。
+
+- 新增20：共享/导航9、审计7、运维3、历史迁移1。原9个PG专用用例保留，本轮无新增PG竞争。最终完整SQLite205通过；最后的“名称”文案收尾另跑7个审计用例通过。
+- 一次独立全变更审查，内存SQLite18个定向用例通过。审查发现单个变更行快照未映射元数据，按X3完整性缺口先失败回归再修复，完整205通过；未冒称二次复审或审查者执行了PG/浏览器。
+- 保留双epoch读取，新增元数据读完→停止共享→最终校验的回归，确实返回stale/无文件。无生产调用包装API移除。正常源撤回后厂端详情已404；仅面板读取期间失权新增明确提示。
+- Chrome管理员工厂视角：交接详情200、审计链接0、源端审计350直访404；全部组织视角：链接8、直访200。集团tree权限另有HTTP回归。
+- Chrome普通源店长已拒交接无上传入口，浏览器构造有效CSRF/PDF请求仍403。新虚构交接在路由暂停时允许超管例外上传，审计357明确“是”，路由随后恢复启用；原交接3保持拒单。
+- Chrome审计289只展示3个变化字段；353嵌套申请/明细有中文标签、当前可见名称及ID。390×844手机无整页横向溢出，七张截图逐张检查。伪造上传403为预期控制台错误，不宣称全会话零错误。
+- 预升级DB/media备份成功，0020实际应用。原epoch2/6保持、旧时间null，新交接epoch1记录时间；只读admin无保存或删除入口，新增/修改/删除伪造请求和staff访问由自动回归验证403。
+- 36张表623条既有记录共同列与备份逐字段相同（含16订单、353审计、18原账号密码），8个旧物理文件字节哈希一致。route1=True，integrity_check=ok；新虚构订单17/交接4/附件11保留演示，无旧附件清理。
+- check、无迁移漂移、collectstatic、生产配置check通过，预览已重启至v1.1.7，登录200。
+
+逐项核验、X5/X6/X8反证及范围见[八次评审处理记录](V117_EIGHTH_REVIEW_RESPONSE.md)。
+
+![拒单后须重新发送才能新增共享](screenshots/v117-rejected-sharing.png)
+
+![工厂组织视角不生成源店审计死链](screenshots/v117-factory-audit-scope.png)
+
+![审计优先展示三项实际差异](screenshots/v117-audit-differences.png)
+
+![嵌套快照中文字段及名称和ID](screenshots/v117-nested-audit.png)
+
+![管理员例外上传明确留痕](screenshots/v117-override-audit.png)
+
+![附件epoch只读运维及历史未知时间](screenshots/v117-evidence-operations.png)
+
+![手机差异行按前后顺序排列](screenshots/v117-mobile-audit.png)
+
+---
+
+以下为前轮验证历史，数字与行为仅代表当时版本。
+
 # 验证记录 · v1.1.6 七次评审修正
 
 2026-10-18，功能提交 `c17e27f`。**185用例**：SQLite176通过/9个PG专用跳过，PostgreSQL184通过/1个SQLite备份专用跳过。Ubuntu/Windows×Python3.12/3.13及PostgreSQL16五组全绿，真实PG输出已核对：[功能CI日志](https://github.com/3578190277jqx/erp/actions/runs/39094484009)。文档/截图交付提交的最新结果另在[原PR Checks](https://github.com/3578190277jqx/erp/pull/1/checks)核对。
