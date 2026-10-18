@@ -1,3 +1,35 @@
+# 验证记录 · v1.1.5 六次评审修正
+
+2026-10-18验收，功能提交 `5ed52b4`。**163用例**：SQLite154通过/9个PG专用跳过；PostgreSQL162通过/1个SQLite备份专用跳过。Ubuntu/Windows×Python3.12/3.13和PostgreSQL16五组全绿，实际日志已核对：[运行日志](https://github.com/3578190277jqx/erp/actions/runs/39023540314)。最新交付文档及截图以原PR Checks为准。
+
+- 生命周期/审批14个、历史迁移1个、真实PG竞争1个，共新增16。停用路由覆盖三个交接状态，源店治理及厂端历史/拒单保留；同时间审计防自审；11类页面阻断原因与POST一致；成功/失败重算版本均有回归。
+- 新PG竞争：厂端已读元数据后，源端完成删除并推进父版本，厂端最终拒绝；刻意不依赖物理清理。原8种PG竞争保持，全部通过。
+- 一次有效独立全变更审查无确认的重要问题，内存库18个定向测试通过。首次额度失败未出报告，恢复后完成；未冒称两次审查。PG/浏览器/CI为主执行者核对结果。
+- 升级前DB与media备份保留，integrity_check=ok，0018在原库实际应用。旧3号文件类别stopped，4/5号reassigned；原文件名、哈希、归档时间和版本不改，物理文件仍在。不能匹配审计的旧归档保持原因未分类。
+- 系统check、迁移无漂移、collectstatic、生产check --deploy --fail-level WARNING通过。预览服务已重启至当前版本。
+- Chrome厂端上传一份虚构PDF，按钮显示「撤回我的文件」。管理员从Django管理页停用路由后，厂端上传/删除/停止共享请求均403，文件下载200；接单入口消失，拒单保留。普通源店长按钮「停止向工厂共享」仍可用，填写原因后归档成功，源店下载200。验收后恢复路由启用，厂端仍不能下载归档件（403）。
+- Chrome区分「人工停止共享」与「改派归档」；本轮新文件6归档保留，没有删除历史文件。数据库核对route1恢复True、文件3/4/5/6未删除且物理存在。
+- Chrome申请人demo_admin查看申请6，批准按钮0个，显示「暂不可批准：申请人不能审批自己的变更」。390×844手机同样可见，scrollWidth=390。普通源店浏览器会话控制台0错误/0警告；厂端测试403预期，Django管理页favicon.ico404为已知非业务资源问题，未声称其零错误。
+- 既有合同11676.79、来源报价12325.50/折扣0.95、尾款实收100保持，密码不重置。purge命令仅在临时测试目录验证，未对真实归档件执行清理。
+
+逐项处理、V3反证及V7清理限制见[V1–V8记录](V115_SIXTH_REVIEW_RESPONSE.md)。
+
+![本人申请不能自批](screenshots/v115-self-approval-blocked.png)
+
+![工厂自己的文件撤回文案](screenshots/v115-factory-withdraw-label.png)
+
+![停用路由后历史只读](screenshots/v115-disabled-route-readonly.png)
+
+![人工停止共享归档](screenshots/v115-manual-archive.png)
+
+![改派归档单独标明](screenshots/v115-reassigned-archive.png)
+
+![手机审批阻断原因](screenshots/v115-mobile-approval-blocker.png)
+
+---
+
+以下为前轮验证历史，数字与行为仅代表当时版本。
+
 # 验证记录 · v1.1.4 五次评审修正
 
 2026-10-17，最终功能提交 `2c65a65`。**147用例**：SQLite139通过/8个PG专用跳过；PostgreSQL146通过/1个SQLite备份专用跳过。Ubuntu/Windows×Python3.12/3.13和PostgreSQL16五组CI全绿，实际日志已核对：[运行日志](https://github.com/3578190277jqx/erp/actions/runs/39020960795)。原PR Checks跟踪后续文档和截图提交。
