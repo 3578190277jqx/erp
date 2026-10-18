@@ -16,6 +16,7 @@ LABELS = {
     'change':'变更申请快照','handoff':'交接快照','handoffs':'交接快照',
     'route_override':'管理员例外上传','target':'目标工厂','source_code':'源订单编号',
     'source_version':'源订单版本','lines':'产品明细','id':'记录 ID',
+    'line':'申请明细快照',
 }
 WRAPPERS = {'change':m.ChangeRequest,'handoff':m.Handoff,'handoffs':m.Handoff,
             'attachment':m.Attachment,'attachments':m.Attachment}
@@ -34,6 +35,7 @@ def flatten(value,model,path=(),labels=(),field=None):
             key=str(key);child_field=field_for(model,key)
             label=LABELS.get(key) or str(getattr(child_field,'verbose_name',key))
             child_model=WRAPPERS.get(key)
+            if key=='line' and model is m.ChangeRequest:child_model=m.ChangeLine
             if child_model is None and child_field is not None and child_field.is_relation:
                 child_model=child_field.related_model
             yield from flatten(child,child_model,path+(key,),labels+(label,),child_field)

@@ -202,6 +202,18 @@ class AuditPresentationTests(EighthReviewFixture):
         self.assertContains(response,'本次记录没有字段值变化')
         self.assertContains(response,'仍保留')
 
+    def test_removed_change_line_uses_its_own_snapshot_metadata(self):
+        change=self.make(m.ChangeRequest,order=self.source,requested_by=self.sales,order_version=self.source.version,
+                         proposed_total=1000,proposed_due_date=self.source.due_date)
+        line=m.ChangeLine.objects.create(change=change,operation='remove',name='旧柜体',quantity=2,unit_price=100)
+        event=self.make(m.AuditEvent,object_type='changes',object_id=change.pk,code=change.code,
+                        action='remove_change_line',before={'change':snapshot(change),'line':snapshot(line)},
+                        after={'change':snapshot(change),'recalculation_error':''})
+        response=self.page(event)
+        self.assertContains(response,'申请明细快照 / 变更类型')
+        self.assertContains(response,'减项')
+        self.assertContains(response,'申请明细快照 / 变更后计价数量')
+
 
 class EvidenceOperationsTests(EighthReviewFixture):
     def test_epoch_timestamp_tracks_mutation_without_changing_parent(self):
