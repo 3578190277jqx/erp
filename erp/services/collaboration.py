@@ -40,9 +40,11 @@ def send_handoff(user,order,target,version,note='',handoff_version=None):
         files=list(m.Attachment.objects.select_for_update().filter(object_type='handoffs',object_id=existing.pk,
                    organization=order.organization,deleted_at__isnull=True,archived_at__isnull=True))
         if files:
+            from .evidence import advance_evidence_epoch
             before={'target':existing.target_organization_id,'attachments':[snapshot(item) for item in files]}
             for item in files:
                 item.archived_at=timezone.now();item.archive_reason='reassigned';save_version(item,item.version)
+            advance_evidence_epoch(existing)
             audit(user,existing,'archive_handoff_evidence',before,
                   after={'target':target.pk,'attachments':[snapshot(item) for item in files],
                          'policy':'保留旧工厂证据，仅源门店可查阅，不向新工厂共享。'})

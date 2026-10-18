@@ -227,4 +227,5 @@ class PostgreSQLBusinessRaces(TransactionTestCase):
             with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(run,['read','write']))
         self.assertCountEqual(results,['blocked','deleted'])
         item.refresh_from_db();handoff.refresh_from_db()
-        self.assertIsNotNone(item.deleted_at);self.assertEqual(handoff.version,2)
+        self.assertIsNotNone(item.deleted_at);self.assertEqual(handoff.version,1)
+        self.assertEqual(evidence.evidence_epoch(handoff),1)

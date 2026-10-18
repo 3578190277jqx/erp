@@ -250,6 +250,7 @@ class ExpandedEvidenceTests(ERPTestCase):
         services.transition(self.sales,handoff,'withdraw',handoff.version,'改派')
         order.refresh_from_db();handoff.refresh_from_db()
         other=m.Organization.objects.create(name='另一工厂',kind='factory')
+        m.CollaborationRoute.objects.create(source=order.organization,target=other)
         collaboration.send_handoff(self.admin,order,other,order.version,handoff_version=handoff.version)
         with TemporaryDirectory() as folder,override_settings(MEDIA_ROOT=folder):
             with self.assertRaises(ValidationError):

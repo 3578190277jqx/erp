@@ -29,7 +29,7 @@ class LifecycleTests(ERPTestCase):
         return evidence.upload_attachment(user,self.handoff,SimpleUploadedFile('生产资料.pdf',b'%PDF-1.7 fictional evidence'),
                   'drawing',True,self.handoff.version,self.factory.pk)
 
-    def test_disabled_route_blocks_all_receiver_writes_but_preserves_read(self):
+    def test_disabled_route_blocks_upload_delete_but_preserves_read_and_emergency_stop(self):
         item=self.upload(self.receiver);self.route.enabled=False;self.route.save()
         for status in ('sent','accepted','completed'):
             self.handoff.status=status;self.handoff.save(update_fields=['status'])
@@ -38,17 +38,17 @@ class LifecycleTests(ERPTestCase):
                 self.assertEqual(evidence.authorized_attachment(self.receiver,item.pk).pk,item.pk)
                 with self.assertRaises(PermissionDenied):self.upload(self.receiver)
                 with self.assertRaises(PermissionDenied):evidence.delete_attachment(self.receiver,item,item.version)
-                with self.assertRaises(PermissionDenied):evidence.stop_sharing_attachment(self.receiver,item,item.version,self.handoff.version,'撤回')
+                self.assertTrue(evidence.can_stop_sharing(self.receiver,self.handoff,item))
         item.refresh_from_db();self.assertIsNone(item.archived_at);self.assertIsNone(item.deleted_at)
         self.client.force_login(self.receiver)
         page=self.client.get(f'/modules/handoffs/{self.handoff.pk}/')
         self.assertFalse(page.context['can_attach'])
-        self.assertNotContains(page,'type="file" name="file"');self.assertNotContains(page,'撤回我的文件')
+        self.assertNotContains(page,'type="file" name="file"');self.assertContains(page,'撤回我的文件')
 
     def test_disabled_route_keeps_source_governance_and_factory_rejection(self):
         item=self.upload(self.receiver);self.route.enabled=False;self.route.save()
         evidence.stop_sharing_attachment(self.manager,item,item.version,self.handoff.version,'停止误传')
-        self.upload(self.sales)
+        with self.assertRaises(PermissionDenied):self.upload(self.sales)
         self.handoff.refresh_from_db()
         with self.assertRaises(PermissionDenied):collaboration.accept_handoff(self.receiver,self.handoff,self.handoff.version)
         collaboration.accept_handoff(self.receiver,self.handoff,self.handoff.version,True,'协作已停用，拒绝在途单')
@@ -75,10 +75,12 @@ class LifecycleTests(ERPTestCase):
         item.refresh_from_db();self.assertEqual(getattr(item,'archive_reason',''),'reassigned')
         self.assertTrue(item.file.storage.exists(item.file.name));self.assertIsNone(item.deleted_at)
 
-    def test_deletion_advances_parent_version(self):
+    def test_deletion_advances_evidence_epoch_without_parent_business_version(self):
         item=self.upload(self.sales);old=self.handoff.version
+        epoch=evidence.evidence_epoch(self.handoff)
         evidence.delete_attachment(self.sales,item,item.version)
-        self.handoff.refresh_from_db();self.assertEqual(self.handoff.version,old+1)
+        self.handoff.refresh_from_db();self.assertEqual(self.handoff.version,old)
+        self.assertEqual(evidence.evidence_epoch(self.handoff),epoch+1)
         self.assertTrue(m.AuditEvent.objects.filter(action='delete_attachment').exists())
 
     def test_deletion_after_metadata_read_denies_download(self):

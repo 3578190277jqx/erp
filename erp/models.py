@@ -507,6 +507,18 @@ class Attachment(Record):
     archived_at = models.DateTimeField('交接附件归档时间',null=True,blank=True,editable=False)
     archive_reason = models.CharField('归档原因类别',max_length=16,blank=True,default='',editable=False,
                          choices=[('reassigned','改派归档'),('stopped','人工停止共享')])
+    uploaded_from_organization = models.ForeignKey(Organization,verbose_name='上传时所属组织',null=True,blank=True,
+                          editable=False,on_delete=models.PROTECT,related_name='origin_attachments')
+
+
+class EvidenceState(models.Model):
+    organization = models.ForeignKey(Organization,on_delete=models.PROTECT)
+    object_type = models.CharField(max_length=30)
+    object_id = models.PositiveBigIntegerField()
+    epoch = models.PositiveBigIntegerField(default=0)
+
+    class Meta:
+        constraints=[models.UniqueConstraint(fields=['object_type','object_id'],name='unique_parent_evidence_state')]
 
 
 class Handoff(Record):

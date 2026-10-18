@@ -6,7 +6,7 @@ from django.test import TransactionTestCase
 
 
 class HistoricalUpgradeTests(TransactionTestCase):
-    latest=('erp','0018_classify_evidence_archive')
+    latest=('erp','0019_evidence_epochs_and_upload_origin')
 
     def tearDown(self):
         MigrationExecutor(connection).migrate([self.latest])
@@ -115,3 +115,5 @@ class HistoricalUpgradeTests(TransactionTestCase):
         self.assertEqual([i.version for i in fresh],[3,3,3]);self.assertTrue(all(i.archived_at==at for i in fresh))
         self.assertEqual([i.file.name for i in fresh],[f'private/old-{i}.pdf' for i in range(3)])
         self.assertTrue(all(i.sha256=='a'*64 and i.deleted_at is None for i in fresh))
+        self.assertTrue(all(i.uploaded_from_organization_id is None for i in fresh))
+        self.assertEqual(m.EvidenceState.objects.count(),0)

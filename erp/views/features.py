@@ -98,8 +98,9 @@ def feature_context(request,obj):
         for item in context['attachments']:
             item.can_delete=evidence.can_delete_evidence(request.user,obj,item,rights)
             item.can_stop_sharing=evidence.can_stop_sharing(request.user,obj,item,rights)
-            item.stop_share_label='停止向工厂共享' if rights.archived_read else '撤回我的文件'
-        context['can_attach']=rights.write
+            item.stop_share_label=('停止向工厂共享' if rights.archived_read else
+                                  '撤回我的文件' if item.owner_id==request.user.pk else '停止本厂文件共享')
+        context['can_attach']=rights.upload
         context['shared_evidence']=isinstance(obj,m.Handoff)
     context['today_iso']=str(timezone.localdate())
     return context
