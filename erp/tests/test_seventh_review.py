@@ -135,6 +135,27 @@ class EvidenceBoundaryTests(ERPTestCase):
         item.refresh_from_db();self.assertEqual(item.uploaded_from_organization_id,self.factory.pk)
         self.assertIsNotNone(item.archived_at)
 
+    def test_rejected_handoff_preserves_current_factory_emergency_stop(self):
+        own=self.upload(self.receiver);managed=self.upload(self.receiver)
+        self.route.enabled=False;self.route.save()
+        collaboration.accept_handoff(self.receiver,self.handoff,self.handoff.version,True,'停止合作，拒单')
+        self.handoff.refresh_from_db()
+        for user,item in ((self.receiver,own),(self.factory_manager,managed)):
+            with self.subTest(user=user.username):
+                self.assertEqual(evidence.authorized_attachment(user,item.pk).pk,item.pk)
+                self.assertTrue(evidence.can_stop_sharing(user,self.handoff,item))
+                self.stop(user,item)
+                with self.assertRaises(PermissionDenied):evidence.authorized_attachment(user,item.pk)
+
+    def test_emergency_stop_does_not_restore_withdrawn_factory_visibility(self):
+        item=self.upload(self.receiver)
+        services.transition(self.sales,self.handoff,'withdraw',self.handoff.version,'源店已撤回')
+        self.handoff.refresh_from_db()
+        for user in (self.receiver,self.factory_manager):
+            with self.assertRaises(PermissionDenied):evidence.authorized_attachment(user,item.pk)
+            with self.assertRaises(PermissionDenied):self.stop(user,item)
+        item.refresh_from_db();self.assertIsNone(item.archived_at)
+
 
 class AuditAndPricingTests(ERPTestCase):
     def setUp(self):

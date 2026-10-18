@@ -47,7 +47,8 @@ def evidence_permissions(user,parent):
         from .collaboration import route_enabled
         source_read=scoped(user,m.Order).filter(pk=parent.order_id).exists()
         source_edit=scoped(user,m.Order,action='edit').filter(pk=parent.order_id).exists()
-        receiver=parent.status in ('sent','accepted','completed') and can(user,'handoffs','accept',parent.target_organization_id)
+        receiver_actor=can(user,'handoffs','accept',parent.target_organization_id)
+        receiver=parent.status in ('sent','accepted','completed') and receiver_actor
         enabled=route_enabled(user,parent)
         write=source_edit or receiver and enabled
         # The management membership itself must cover the source order; a
@@ -60,7 +61,7 @@ def evidence_permissions(user,parent):
         factory_manage=any(member.role in ('boss','manager') and member.scope!='own'
             and parent.target_organization_id in member_orgs(member) for member in memberships(user))
         return EvidencePermissions(True,write,source_read,manage,upload=write and enabled,
-                                   receiver_stop=receiver,manage_factory_sharing=factory_manage)
+                                   receiver_stop=receiver_actor,manage_factory_sharing=factory_manage)
     if isinstance(parent,m.PurchaseReceipt):
         write=scoped(user,m.Purchase,action='receive').filter(pk=parent.purchase_id).exists()
     elif isinstance(parent,m.Production) and scoped(user,m.Production,action='issue').filter(pk=parent.pk).exists():write=True
