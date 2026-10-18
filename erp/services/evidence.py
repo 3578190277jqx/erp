@@ -13,6 +13,7 @@ from erp.permissions import scoped, require_access, can, memberships, member_org
 from .common import audit,save_version,snapshot
 
 MAX_BYTES = 20 * 1024 * 1024
+HANDOFF_UPLOAD_STATUSES = frozenset({'sent','accepted','completed'})
 PARENTS = {'customers':m.Customer,'measurements':m.Measurement,'designs':m.Design,'quotes':m.Quote,
            'orders':m.Order,'breakdowns':m.Breakdown,'deliveries':m.Delivery,'installations':m.Installation,'aftersales':m.AfterSales,
            'purchases':m.Purchase,'production':m.Production,'changes':m.ChangeRequest,
@@ -40,6 +41,10 @@ class EvidencePermissions:
     manage_factory_sharing: bool=False
 
 
+def handoff_upload_open(parent):
+    return parent.status in HANDOFF_UPLOAD_STATUSES
+
+
 def evidence_permissions(user,parent):
     visible=scoped(user,type(parent)).filter(pk=parent.pk).exists()
     if not visible:return EvidencePermissions()
@@ -48,7 +53,7 @@ def evidence_permissions(user,parent):
         source_read=scoped(user,m.Order).filter(pk=parent.order_id).exists()
         source_edit=scoped(user,m.Order,action='edit').filter(pk=parent.order_id).exists()
         receiver_actor=can(user,'handoffs','accept',parent.target_organization_id)
-        receiver=parent.status in ('sent','accepted','completed') and receiver_actor
+        receiver=handoff_upload_open(parent) and receiver_actor
         enabled=route_enabled(user,parent)
         write=source_edit or receiver and enabled
         # The management membership itself must cover the source order; a
@@ -61,7 +66,7 @@ def evidence_permissions(user,parent):
         factory_manage=any(member.role in ('boss','manager') and member.scope!='own'
             and parent.target_organization_id in member_orgs(member) for member in memberships(user))
         return EvidencePermissions(True,write,source_read,manage,
-                                   upload=write and enabled and parent.status in ('sent','accepted','completed'),
+                                   upload=write and enabled and handoff_upload_open(parent),
                                    receiver_stop=receiver_actor,manage_factory_sharing=factory_manage)
     if isinstance(parent,m.PurchaseReceipt):
         write=scoped(user,m.Purchase,action='receive').filter(pk=parent.purchase_id).exists()

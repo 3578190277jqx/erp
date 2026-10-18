@@ -1,13 +1,27 @@
 {% if audit_payloads %}
-<section class="panel audit-panel" aria-label="本次变更差异">
-  <div class="panel-heading"><div><h2>本次变更</h2><p>仅列出记录中变化的字段，完整快照可在下方展开。</p></div><span class="subtle">{{ audit_differences|length }} 项</span></div>
+<section class="panel audit-panel" aria-label="审计记录内容">
+  <div class="panel-heading"><div><h2>{% if audit_is_write %}本次写入{% else %}本次变更{% endif %}</h2><p>仅比较两侧均有记录且结构可比的字段；未记录字段不代表被清空。完整快照可在下方展开。</p></div><span class="subtle">{% if audit_is_write %}{{ audit_write_rows|length }} 个记录字段{% else %}{{ audit_differences|length }} 项可比变化{% endif %}</span></div>
   <p class="audit-reference-note subtle">关联名称为当前可见资料，不代表操作当时的名称；原始 ID 始终保留。</p>
-  {% if audit_differences %}
+  {% if audit_is_write %}
+  <div class="table-scroll"><table class="data-table"><thead><tr><th>字段</th><th>写入内容</th></tr></thead><tbody>
+    {% for row in audit_write_rows %}<tr><th scope="row">{{ row.key }}</th><td><pre class="audit-value">{{ row.value }}</pre></td></tr>
+    {% empty %}<tr><td colspan="2">本次没有记录写入字段。</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% elif audit_differences %}
   <div class="audit-differences">{% for row in audit_differences %}
     <div class="audit-diff-row"><h3>{{ row.key }}</h3><div class="audit-diff-values"><div><small>变更前</small><pre class="audit-value">{{ row.before }}</pre></div><div><small>变更后</small><pre class="audit-value">{{ row.after }}</pre></div></div></div>
   {% endfor %}</div>
+  {% elif audit_recorded_fields %}<p class="feature-empty">没有可比较的字段变化；单侧记录见下方，不据此推断字段增删。</p>
   {% else %}<p class="feature-empty">本次记录没有字段值变化。</p>{% endif %}
 </section>
+{% if not audit_is_write %}{% for payload in audit_recorded_payloads %}{% if payload.rows %}
+<details class="panel audit-panel audit-snapshot" {% if payload.title == '变更后' %}open{% endif %}>
+  <summary>仅{{ payload.title }}记录的内容 · {{ payload.rows|length }} 个字段</summary>
+  <div class="table-scroll"><table class="data-table"><thead><tr><th>字段</th><th>记录内容（不推断增删）</th></tr></thead>
+    <tbody>{% for row in payload.rows %}<tr><th scope="row">{{ row.key }}</th><td><pre class="audit-value">{{ row.value }}</pre></td></tr>{% endfor %}</tbody>
+  </table></div>
+</details>
+{% endif %}{% endfor %}{% endif %}
 {% for payload in audit_payloads %}
 <details class="panel audit-panel audit-snapshot">
   <summary>完整{{ payload.title }}快照</summary>

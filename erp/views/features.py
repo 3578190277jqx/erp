@@ -99,7 +99,7 @@ def feature_context(request,obj):
     if obj.module in evidence.PARENTS:
         context['attachments'],rights,context['evidence_stale']=evidence.attachment_context(request.user,obj)
         context['evidence_unavailable']=not rights.visible and not context['evidence_stale']
-        context['handoff_upload_closed']=isinstance(obj,m.Handoff) and obj.status in ('rejected','withdrawn')
+        context['handoff_upload_closed']=isinstance(obj,m.Handoff) and not evidence.handoff_upload_open(obj)
         for item in context['attachments']:
             item.can_delete=evidence.can_delete_evidence(request.user,obj,item,rights)
             item.can_stop_sharing=evidence.can_stop_sharing(request.user,obj,item,rights)
