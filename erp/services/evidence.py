@@ -206,6 +206,15 @@ def authorized_attachment(user,pk):
     raise PermissionDenied('共享范围正在变化，请刷新后重试。')
 
 
+def attachment_audit_state(item):
+    data=snapshot(item)
+    # Ordinary snapshots omit nulls; governance needs an explicit before value.
+    for key in ('archived_at','deleted_at'):
+        value=getattr(item,key)
+        data[key]=str(value) if value is not None else None
+    return data
+
+
 @transaction.atomic
 def stop_sharing_attachment(user,item,version,parent_version,reason):
     if item.object_type!='handoffs':raise ValidationError('只有交接附件支持停止共享。')
@@ -223,10 +232,11 @@ def stop_sharing_attachment(user,item,version,parent_version,reason):
     except (ValueError,TypeError):raise ValidationError('缺少有效附件与交接版本。')
     if item.deleted_at or item.archived_at or item.version!=expected or parent.version!=expected_parent:
         raise ValidationError('附件已停止共享、已删除或版本变化，请刷新。')
-    before={'handoff':snapshot(parent),'attachment':snapshot(item)}
+    before={'handoff':snapshot(parent),'attachment_state':attachment_audit_state(item)}
     item.archived_at=timezone.now();item.archive_reason='stopped'
     save_version(item,expected);advance_evidence_epoch(parent)
-    audit(user,parent,'stop_sharing_attachment',before,after={'attachment':item.code,'reason':reason,
+    audit(user,parent,'stop_sharing_attachment',before,after={'handoff':snapshot(parent),
+          'attachment_state':attachment_audit_state(item),'attachment':item.code,'reason':reason,
           'archived_at':str(item.archived_at),'sha256':item.sha256,'policy':'文件保留，仅源门店可查阅，不自动恢复共享。'})
     return item
 
@@ -255,7 +265,9 @@ def delete_attachment(user,item,version):
     try:expected=int(version)
     except (ValueError,TypeError):raise ValidationError('缺少有效版本。')
     if item.deleted_at or item.version!=expected:raise ValidationError('附件已删除或版本变化，请刷新。')
-    before=snapshot(item);item.deleted_at=timezone.now();save_version(item,expected)
+    before={'attachment_state':attachment_audit_state(item)}
+    item.deleted_at=timezone.now();save_version(item,expected)
     advance_evidence_epoch(parent)
-    audit(user,parent,'delete_attachment',before=before,after={'attachment':item.code,'sha256':item.sha256,'deleted_at':str(item.deleted_at)})
+    audit(user,parent,'delete_attachment',before=before,after={'attachment_state':attachment_audit_state(item),
+          'attachment':item.code,'sha256':item.sha256,'deleted_at':str(item.deleted_at)})
     transaction.on_commit(lambda:purge_attachment_file(item.pk))

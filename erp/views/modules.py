@@ -1,4 +1,5 @@
 import csv
+from datetime import datetime
 from decimal import Decimal
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -18,6 +19,7 @@ from erp.permissions import can, scoped
 from erp.registry import MODULES, RELATED_MODULES, editable
 from erp.services import transition, add_line, adjust_stock, record_payment, available_actions
 from erp.services.common import lock, snapshot, save_version, audit
+from erp.time_display import local_timestamp
 
 BUSINESS_ERRORS = (ValidationError, IntegrityError, OperationalError)
 
@@ -105,6 +107,7 @@ def display_value(obj, field):
     if isinstance(value, Decimal):
         return f'¥{value:,.2f}' if field in ('total', 'amount', 'unit_price', 'unit_cost', 'proposed_total') else f'{value:,.3f}'.rstrip('0').rstrip('.')
     if hasattr(value, 'strftime'):
+        if isinstance(value,datetime):return local_timestamp(value) or str(value)
         return value.strftime('%Y-%m-%d %H:%M') if field.endswith('_at') else value.strftime('%Y-%m-%d')
     return str(value)
 

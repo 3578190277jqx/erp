@@ -8,6 +8,7 @@ from django.db.models import Q
 from . import models as m
 from .permissions import scoped, accessible_organizations
 from .registry import MODULES
+from .time_display import local_timestamp
 
 LABELS = {
     'reason':'停止原因','attachment':'附件编号','attachments':'附件快照','sha256':'文件校验和',
@@ -18,13 +19,16 @@ LABELS = {
     'source_version':'源订单版本','lines':'产品明细','id':'记录 ID','name':'名称',
     'line':'申请明细快照',
     'archived_at':'停止共享时间','deleted_at':'删除时间',
+    'attachment_state':'附件状态快照',
 }
 WRAPPERS = {'change':m.ChangeRequest,'handoff':m.Handoff,'handoffs':m.Handoff,
-            'attachment':m.Attachment,'attachments':m.Attachment}
+            'attachment':m.Attachment,'attachments':m.Attachment,'attachment_state':m.Attachment}
+TIME_KEYS = {'archived_at','deleted_at','purged_at','created_at','updated_at'}
 
 
 def field_for(model,key):
     if model is None:return None
+    if model is m.Handoff and key=='target':key='target_organization'
     try:return model._meta.get_field(key)
     except FieldDoesNotExist:return None
 
@@ -32,6 +36,7 @@ def field_for(model,key):
 def child_metadata(model,key):
     field=field_for(model,key)
     label=LABELS.get(key) or str(getattr(field,'verbose_name',key))
+    if model is m.Attachment and key=='archived_at':label='归档时间'
     child_model=WRAPPERS.get(key)
     if key=='line' and model is m.ChangeRequest:child_model=m.ChangeLine
     if child_model is None and field is not None and field.is_relation:
@@ -39,16 +44,17 @@ def child_metadata(model,key):
     return field,label,child_model
 
 
-def flatten(value,model,path=(),labels=(),field=None):
+def flatten(value,model,path=(),labels=(),field=None,summary_lists=False):
     if isinstance(value,dict) and value:
         for key,child in value.items():
             key=str(key);child_field,label,child_model=child_metadata(model,key)
-            yield from flatten(child,child_model,path+(key,),labels+(label,),child_field)
-    elif isinstance(value,list) and value:
+            yield from flatten(child,child_model,path+(key,),labels+(label,),child_field,summary_lists)
+    elif isinstance(value,list) and value and not summary_lists:
         for index,child in enumerate(value):
             yield from flatten(child,model,path+(index,),labels+(f'第{index+1}项',),field)
-    elif path:
-        yield {'path':path,'key':' / '.join(labels),'raw':value,'field':field}
+    elif path or isinstance(value,list) and summary_lists:
+        yield {'path':path,'key':' / '.join(labels) or '内容','raw':value,'field':field,
+               'list_summary':summary_lists and isinstance(value,list)}
 
 
 def reference(row):
@@ -89,11 +95,12 @@ def reference_names(user,event,organization,rows):
 
 
 def display(row,names):
-    if row is None:return '未记录此字段'
     value=row['raw']
     if value is None:return '未记录'
     if value=='':return '未填写'
     if isinstance(value,bool):return '是' if value else '否'
+    if row.get('list_summary'):
+        return f'{len(value)} 条（内容见完整快照）' if value else '0 条（无条目）'
     if value==[]:return '无条目'
     if value=={}:return '无字段'
     ref=reference(row)
@@ -101,6 +108,10 @@ def display(row,names):
         name=names.get(ref)
         return f'{name}（ID: {ref[1]}）' if name else f'ID: {ref[1]}（当前名称不可用）'
     field=row['field']
+    path=row.get('path',())
+    if isinstance(field,models.DateTimeField) or path and path[-1] in TIME_KEYS:
+        formatted=local_timestamp(value)
+        if formatted is not None:return formatted
     if field is not None:
         for stored,label in getattr(field,'flatchoices',()):
             if str(stored)==str(value):return str(label)
@@ -122,7 +133,7 @@ def compare_payloads(before,after,model,names):
 
     def record(stage,value,model,path,labels,field):
         recorded.extend(dict(row,stage=stage,value=display(row,names))
-                        for row in flatten(value,model,path,labels,field))
+                        for row in flatten(value,model,path,labels,field,summary_lists=True))
 
     def compare(a,b,model,path=(),labels=(),field=None):
         if same_value(a,b):return
@@ -139,12 +150,13 @@ def compare_payloads(before,after,model,names):
             # One collection comparison avoids false index-based field removals.
             differences.append({'key':' / '.join(labels) or '内容',
                 'before':f'{len(a)} 条（内容见完整快照）' if a else '0 条（无条目）',
-                'after':f'{len(b)} 条（内容见完整快照）' if b else '0 条（已清空）'})
+                'after':(f'{len(b)} 条（条数不变，内容或顺序有变化；见完整快照）' if len(a)==len(b)
+                         else f'{len(b)} 条（内容见完整快照）' if b else '0 条（已清空）')})
         elif isinstance(a,(dict,list)) or isinstance(b,(dict,list)):
             record('变更前',a,model,path,labels,field)
             record('变更后',b,model,path,labels,field)
         else:
-            old={'raw':a,'field':field};new={'raw':b,'field':field}
+            old={'raw':a,'field':field,'path':path};new={'raw':b,'field':field,'path':path}
             differences.append({'key':' / '.join(labels),'before':display(old,names),'after':display(new,names)})
 
     compare(before,after,model)
@@ -161,9 +173,28 @@ def audit_context(user,event,organization=None):
     names=reference_names(user,event,organization,[row for _,rows in stages for row in rows])
     snapshots=[{'title':title,'rows':[dict(row,value=display(row,names)) for row in rows]} for title,rows in stages]
     differences,recorded=compare_payloads(*values,model,names)
+    is_write=not values[0]
+    write_rows=[dict(row,value=display(row,names)) for row in flatten(values[1],model,summary_lists=True)] if is_write else []
+
+    def covers(rows,full):
+        left={r['path']:r['raw'] for r in rows};right={r['path']:r['raw'] for r in full}
+        return bool(left) and same_value(left,right)
+
+    recorded_payloads=[]
+    for index,payload in enumerate(snapshots):
+        rows=[r for r in recorded if r['stage']==payload['title']]
+        complete=covers(rows,payload['rows'])
+        payload['show']=bool(payload['rows']) and not complete and not (is_write and index==1 and covers(write_rows,payload['rows']))
+        if rows:recorded_payloads.append({'title':payload['title'],'rows':rows,'complete':complete})
+    after_count=sum(r['stage']=='变更后' for r in recorded)
+    heading='本次写入' if is_write else '本次变更' if differences or not recorded else '本次操作记录'
+    if is_write:summary=f'{len(write_rows)} 个记录字段'
+    elif differences:
+        summary=f'{len(differences)} 项可比变化'+(f' · {after_count} 个补充字段' if after_count else '')
+    elif recorded:summary=f'{after_count} 个结果记录字段' if after_count else f'{len(recorded)} 个历史记录字段'
+    else:summary='0 项可比变化'
     return {'audit_payloads':snapshots,'audit_differences':differences,
-            'audit_is_write':not values[0], 'audit_write_rows':snapshots[1]['rows'],
+            'audit_is_write':is_write,'audit_write_rows':write_rows,'audit_heading':heading,'audit_summary':summary,
             'audit_recorded_fields':recorded,
-            'audit_recorded_payloads':[{'title':title,'rows':[r for r in recorded if r['stage']==title]}
-                                       for title in ('变更后','变更前')],
+            'audit_recorded_payloads':list(reversed(recorded_payloads)),
             'audit_raw':json.dumps({'before':event.before,'after':event.after},ensure_ascii=False,indent=2)}

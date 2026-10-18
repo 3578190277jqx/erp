@@ -24,7 +24,8 @@ class AuditPayloadSemanticsTests(EighthReviewFixture):
         evidence.stop_sharing_attachment(self.manager,item,item.version,self.handoff.version,'误传')
         event=m.AuditEvent.objects.get(action='stop_sharing_attachment')
         context=self.context(event)
-        self.assertEqual(context['audit_differences'],[])
+        self.assertEqual({r['key'] for r in context['audit_differences']},
+                         {'附件状态快照 / 版本','附件状态快照 / 归档时间','附件状态快照 / 归档原因类别'})
         recorded={r['key']:r['value'] for r in context['audit_recorded_fields'] if r['stage']=='变更后'}
         self.assertEqual(set(recorded),{'附件编号','停止原因','停止共享时间','文件校验和','处理规则'})
         self.assertEqual(recorded['附件编号'],item.code)
@@ -40,7 +41,8 @@ class AuditPayloadSemanticsTests(EighthReviewFixture):
         evidence.delete_attachment(self.sales,item,item.version)
         event=m.AuditEvent.objects.get(action='delete_attachment')
         context=self.context(event)
-        self.assertEqual(context['audit_differences'],[])
+        self.assertEqual({r['key'] for r in context['audit_differences']},
+                         {'附件状态快照 / 版本','附件状态快照 / 删除时间'})
         self.assertIn('删除时间',{r['key'] for r in context['audit_recorded_fields']})
         item.refresh_from_db();self.assertIsNotNone(item.deleted_at)
 
@@ -111,7 +113,8 @@ class AuditPayloadSemanticsTests(EighthReviewFixture):
         self.assertEqual(len(rows),1)
         self.assertEqual(rows[0]['key'],'内容')
         self.assertEqual(rows[0]['before'],'1 条（内容见完整快照）')
-        self.assertEqual(rows[0]['after'],'1 条（内容见完整快照）')
+        self.assertEqual(rows[0]['after'],'1 条（条数不变，内容或顺序有变化；见完整快照）')
+        self.assertNotEqual(rows[0]['before'],rows[0]['after'])
 
     def test_null_boolean_and_empty_containers_keep_explicit_semantics(self):
         context=self.context(self.event({'nullable':None,'flag':False,'zero':0,'lines':[], 'custom':{}},
