@@ -4,15 +4,25 @@
 
 真实数据库、真实登录、服务端组织/角色/本人范围权限和事务业务流转。界面采用苹果风格系统字体、克制留白、蓝色强调、毛玻璃导航、深浅主题和紧凑密度。移动端是响应式 Web。
 
+**GitHub 开发代码在 [feat/furniture-erp 分支](https://github.com/3578190277jqx/erp/tree/feat/furniture-erp)**，可直接查看[逐次提交日志](https://github.com/3578190277jqx/erp/commits/feat/furniture-erp)。仓库默认首页为 main；[PR #1](https://github.com/3578190277jqx/erp/pull/1) 尚未合并。
+
 ![桌面工作台预览](docs/screenshots/dashboard-desktop.png)
 
-## v1.1.9 十次评审修正
+## v1.1.10 十一次评审修正
+
+有唯一可靠 code/id 的产品和附件列表按条目逐字段比较，重排单独提示；缺键、重复键或增减条目明确回退整体证据。业务变化与并发版本分开计数，显式 null 与未记录区分。完整快照按已展示事实、共同上下文和剩余字段投影，原始 JSON 保留。
+
+新停止/删除审计保留完整 before、精简 after，不重复父交接快照和未消费的时间/校验和。列表与 CSV 恢复本地分钟格式，审计证据保留秒及偏移。补齐已知模块与动作中文标签。
+
+[查看 AA1–AA8 核验、四个取舍及既定业务口径](docs/V1110_ELEVENTH_REVIEW_RESPONSE.md)。246用例：SQLite237通过/9跳过，PostgreSQL245通过/1跳过；独立复核、历史只读核对与八张实拍见[验证记录](docs/VALIDATION.md)。下方为历史版本记录，当前行为以 v1.1.10 为准。
+
+## v1.1.9 十次评审修正（历史）
 
 新停止共享/删除附件审计记录同构前后状态和显式空时间，能直接比较实际状态变化，旧编号与原因查询继续可用。历史部分日志显示操作结果字段数，等长列表明确提示内容/顺序变化。
 
 审计及单据信息时间统一按系统本地时区显示偏移，原始JSON保留原UTC及精度；目标工厂缩写补字段映射且保持名称范围。重复完整表合并，单侧列表保留摘要和完整明细，写入事件不再显示空前快照。
 
-[查看Z1–Z7核验与取舍](docs/V119_TENTH_REVIEW_RESPONSE.md)。231用例：SQLite222通过/9跳过，PostgreSQL230通过/1跳过；CI、历史只读核对与六张实拍见[验证记录](docs/VALIDATION.md)。下方为历史版本记录，当前行为以v1.1.9为准。
+[查看Z1–Z7核验与取舍](docs/V119_TENTH_REVIEW_RESPONSE.md)。当时231用例：SQLite222通过/9跳过，PostgreSQL230通过/1跳过；CI、历史只读核对与六张实拍见[验证记录](docs/VALIDATION.md)。
 
 ## v1.1.8 九次评审修正（历史）
 

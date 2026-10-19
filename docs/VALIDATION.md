@@ -1,3 +1,36 @@
+# 验证记录 · v1.1.10 十一次评审修正
+
+2026-10-19 交付核验，功能提交 `f2fbb06`。**246项：SQLite237通过/9个PG专用跳过，PostgreSQL245通过/1个SQLite备份专用跳过**。[功能提交五组CI成功](https://github.com/3578190277jqx/erp/actions/runs/39136616107)，实际输出已下载核对。最终交付提交另在[原PR Checks](https://github.com/3578190277jqx/erp/pull/1/checks)按确切提交核验。
+
+- 新增15项，原231保留；唯一code/id配对、回退/重排、null、业务/技术分层、新治理载荷、实际列表/CSV/审计详情、事实投影与转义均覆盖。没有新增PG竞争用例。
+- 一次完成的独立全差异复核无待修/延后项，独立新增15项与完整246项通过（完整9PG跳过）；307个额外内存探针通过，不计入仓库测试总数。首次额度中断后恢复同一复核者完成，不冒称两次完整复核。
+- 历史357条只读渲染，空标签0、等长同文摘要0。275显示产品ID25折后净额10907.52→10333.44；307为1业务变化、2校验信息更新、3补充字段。350旧部分证据不生成虚假清空。
+- Chrome桌面1440、手机390×844：审计307/275/门厂交接列表无整页横向溢出，宽表内部滚动。列表时间分钟格式、审计秒及偏移，已知模块/动作中文；八张截图逐张查看。
+- 36表632条业务/账号记录全字段摘要、9个附件路径/字节摘要前后一致，integrity_check=ok。浏览器认证仅写会话，不修改账号last_login。无新原库业务或审计写入，未在原库点击CSV导出。
+- check、无迁移漂移、diff检查通过，功能CI覆盖静态收集与生产配置检查；无新迁移/依赖。预览v1.1.10，登录200。Excel/WPS实际自动日期识别未验证。
+
+[AA1–AA8、四个取舍与既定业务口径](V1110_ELEVENTH_REVIEW_RESPONSE.md)。[直接打开GitHub开发代码](https://github.com/3578190277jqx/erp/tree/feat/furniture-erp)，仓库默认main尚未合并。
+
+![附件按身份比较且技术更新单独折叠](screenshots/v1110-identified-attachments.png)
+
+![产品明细逐字段金额变化](screenshots/v1110-product-fields.png)
+
+![历史单侧证据不误判清空](screenshots/v1110-recorded-evidence.png)
+
+![交接列表恢复分钟时间](screenshots/v1110-list-time.png)
+
+![审计列表已知模块和动作中文](screenshots/v1110-chinese-audit-list.png)
+
+![手机附件身份与变化分层](screenshots/v1110-mobile-identities.png)
+
+![手机产品逐字段比较与共同上下文](screenshots/v1110-mobile-product.png)
+
+![手机交接列表与内部横向表格](screenshots/v1110-mobile-list.png)
+
+---
+
+以下为对应版本历史验证，数字与行为代表当时状态。
+
 # 验证记录 · v1.1.9 十次评审修正
 
 2026-10-18，功能提交 `ebc0971`。**231项：SQLite222通过/9个PG专用跳过，PostgreSQL230通过/1个SQLite备份专用跳过**。[功能提交五组CI成功](https://github.com/3578190277jqx/erp/actions/runs/39134117564)，实际输出日志已核对。最终交付提交另在[原PR Checks](https://github.com/3578190277jqx/erp/pull/1/checks)核验。
