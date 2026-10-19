@@ -21,9 +21,11 @@ def add_line(user, document, values, version, delete_id=None):
     if set(values) - allowed:
         raise ValidationError('明细字段无效。')
     if delete_id:
-        if not document.lines.filter(pk=delete_id).exists():
+        line=document.lines.filter(pk=delete_id).first()
+        if line is None:
             raise ValidationError('明细不存在。')
-        document.lines.filter(pk=delete_id).delete()
+        before['line']=snapshot(line)
+        line.delete()
     else:
         if 'material' in values:
             material = values['material']
@@ -42,5 +44,9 @@ def add_line(user, document, values, version, delete_id=None):
         from .pricing import quote_amounts
         document.total = quote_amounts(document)['total'] if isinstance(document,Quote) else sum((line.subtotal for line in document.lines.all()),Decimal(0))
     save_version(document, version)
-    audit(user, document, 'delete_line' if delete_id else 'add_line', before)
+    after=snapshot(document)
+    if not delete_id:
+        line.refresh_from_db()
+        after['line']=snapshot(line)
+    audit(user, document, 'delete_line' if delete_id else 'add_line', before,after=after)
     return document

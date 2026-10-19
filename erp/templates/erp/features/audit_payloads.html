@@ -1,7 +1,10 @@
 {% if audit_payloads %}
 <section class="panel audit-panel" aria-label="审计记录内容">
-  <div class="panel-heading"><div><h2>{{ audit_heading }}</h2><p>缺少键表示未记录，不代表字段被清空；空值表示操作时实际状态。业务变化、单侧记录及共同上下文分别展示，完整快照保留在原始 JSON。</p></div><span class="subtle">{{ audit_summary }}</span></div>
+  <div class="panel-heading"><div><h2>{% if audit_full_view %}完整中文快照{% else %}{{ audit_heading }}{% endif %}</h2><p>缺少键表示未记录，不代表字段被清空；空值表示操作时实际状态。摘要与完整中文快照可切换，原始 JSON 始终保留。</p></div><span class="subtle">{{ audit_summary }}</span></div>
   <p class="audit-reference-note subtle">关联名称为当前可见资料，不代表操作当时的名称；原始 ID 始终保留。</p>
+  <p>{% if audit_full_view %}<a class="text-link" href="{% url 'detail' 'audit' obj.pk %}">返回变化摘要</a>{% else %}<a class="text-link" href="?audit_view=full">查看完整中文快照</a>{% endif %}</p>
+  {% if audit_evidence_warning %}<p class="audit-reference-note">{{ audit_evidence_warning }}</p>{% endif %}
+  {% if not audit_full_view %}
   {% if audit_is_write %}
   <div class="table-scroll"><table class="data-table"><thead><tr><th>字段</th><th>写入内容</th></tr></thead><tbody>
     {% for row in audit_write_rows %}<tr><th scope="row">{{ row.key }}</th><td><pre class="audit-value">{{ row.value }}</pre></td></tr>
@@ -12,9 +15,20 @@
     <div class="audit-diff-row"><h3>{{ row.key }}</h3><div class="audit-diff-values"><div><small>变更前</small><pre class="audit-value">{{ row.before }}</pre></div><div><small>变更后</small><pre class="audit-value">{{ row.after }}</pre></div></div>{% if row.note %}<p class="subtle">{{ row.note }}</p>{% endif %}</div>
   {% endfor %}</div>
   {% elif audit_recorded_fields %}<p class="feature-empty">本次操作记录见下方；历史载荷结构不同，不据此推断字段增删。</p>
-  {% elif audit_technical_differences %}<p class="feature-empty">本次仅更新并发校验信息，业务字段未变。</p>
-  {% else %}<p class="feature-empty">本次记录没有字段值变化。</p>{% endif %}
+  {% elif audit_technical_differences %}<p class="feature-empty">当前载荷仅显示并发校验版本变化，不能据此认定业务未发生变化。明细或关联记录可能未记录，请结合动作及相关事件核对。</p>
+  {% else %}<p class="feature-empty">本次载荷未显示可比较字段变化，不据此判断业务是否变化。</p>{% endif %}
+  {% endif %}
 </section>
+{% if audit_full_view %}
+{% for payload in audit_payloads %}{% if payload.rows %}
+<details class="panel audit-panel audit-snapshot">
+  <summary>完整{{ payload.title }}快照 · {{ payload.rows|length }} 个字段</summary>
+  <div class="table-scroll"><table class="data-table"><thead><tr><th>字段</th><th>记录内容</th></tr></thead><tbody>
+  {% for row in payload.rows %}<tr><th scope="row">{{ row.key }}</th><td><pre class="audit-value">{{ row.value }}</pre></td></tr>{% endfor %}
+  </tbody></table></div>
+</details>
+{% endif %}{% endfor %}
+{% else %}
 {% if audit_technical_differences %}
 <details class="panel audit-panel audit-snapshot"><summary>并发校验信息 · {{ audit_technical_differences|length }} 项（不计业务变化）</summary>
   <div class="table-scroll"><table class="data-table"><thead><tr><th>字段</th><th>变更前</th><th>变更后</th></tr></thead><tbody>
@@ -22,6 +36,14 @@
   </tbody></table></div>
 </details>
 {% endif %}
+{% for payload in audit_context_payloads %}
+<details class="panel audit-panel audit-snapshot"><summary>操作时父单据上下文 · 仅{{ payload.title }}记录 · {{ payload.rows|length }} 个字段</summary>
+  <p class="audit-reference-note subtle">用于定位本次操作，不表示这些字段被删除；未记录的后值不作推断。</p>
+  <div class="table-scroll"><table class="data-table"><thead><tr><th>字段</th><th>操作时记录内容</th></tr></thead><tbody>
+  {% for row in payload.rows %}<tr><th scope="row">{{ row.key }}</th><td><pre class="audit-value">{{ row.value }}</pre></td></tr>{% endfor %}
+  </tbody></table></div>
+</details>
+{% endfor %}
 {% if not audit_is_write %}{% for payload in audit_recorded_payloads %}{% if payload.rows %}
 <details class="panel audit-panel audit-snapshot" {% if payload.title == '变更后' %}open{% endif %}>
   <summary>仅{{ payload.title }}记录的内容 · {{ payload.rows|length }} 个字段{% if payload.complete %} · 已含完整{{ payload.title }}快照{% endif %}</summary>
@@ -45,5 +67,6 @@
   {% empty %}<tr><td colspan="2" class="table-empty">未记录此阶段快照</td></tr>{% endfor %}</tbody></table></div>
 </details>
 {% endif %}{% endfor %}
+{% endif %}
 <details class="panel audit-panel audit-snapshot"><summary>原始记录 · JSON</summary><pre class="audit-value audit-raw">{{ audit_raw }}</pre></details>
 {% endif %}

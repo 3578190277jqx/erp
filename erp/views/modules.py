@@ -103,7 +103,9 @@ def display_value(obj, field, *, detailed=False):
     if field == 'action':
         from erp.templatetags.ui import action_name
         return action_name(value)
-    if field=='object_type' and value in MODULES:return MODULES[value].title
+    if field=='object_type':
+        from erp.audit_types import audit_subject,audit_type_title
+        return audit_subject(obj)[1] if isinstance(obj,m.AuditEvent) else audit_type_title(value)
     if isinstance(value,bool):return '是' if value else '否'
     if isinstance(value, Decimal):
         return f'¥{value:,.2f}' if field in ('total', 'amount', 'unit_price', 'unit_cost', 'proposed_total') else f'{value:,.3f}'.rstrip('0').rstrip('.')
@@ -184,6 +186,7 @@ def detail(request, key, pk):
     fields = list(dict.fromkeys(fields))
     info = [{'label': label(module.model, name), 'value': display_value(obj, name,detailed=isinstance(obj,m.AuditEvent))} for name in fields]
     context = {'module': module, 'obj': obj, 'info': info,
+               'detail_timestamp':display_value(obj,'created_at',detailed=isinstance(obj,m.AuditEvent)),
                'detail_title': getattr(obj, 'title', None) or getattr(obj, 'name', None) or module.singular,
                'can_edit': editable(obj) and can(request.user, module.model.module, 'edit', obj.organization_id)
                            and scoped(request.user, module.model, action='edit').filter(pk=obj.pk).exists(),
@@ -192,6 +195,7 @@ def detail(request, key, pk):
     if isinstance(obj,m.AuditEvent):
         from erp.audit_display import audit_context
         context.update(audit_context(request.user,obj,active_org(request)))
+        context['audit_full_view']=request.GET.get('audit_view')=='full'
     if isinstance(obj,m.Handoff):
         from erp.services.collaboration import handoff_actions
         context['actions']=handoff_actions(request.user,obj)

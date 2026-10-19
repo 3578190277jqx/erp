@@ -202,7 +202,7 @@ class AuditPresentationTests(EighthReviewFixture):
     def test_identical_snapshots_show_no_difference_and_keep_full_evidence(self):
         payload={'note':'保持原值','custom':{'未知字段':'仍保留'}}
         response=self.page(self.event(payload,payload))
-        self.assertContains(response,'本次记录没有字段值变化')
+        self.assertContains(response,'本次载荷未显示可比较字段变化')
         self.assertContains(response,'仍保留')
 
     def test_removed_change_line_uses_its_own_snapshot_metadata(self):

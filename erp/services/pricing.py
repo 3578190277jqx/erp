@@ -177,7 +177,8 @@ def add_change_line(user, change, values, version):
     line.save()
     prepare_change(change)
     save_version(change,version)
-    audit(user,change,'add_change_line',before)
+    line.refresh_from_db()
+    audit(user,change,'add_change_line',before,after=snapshot(change)|{'line':snapshot(line)})
     return change
 
 

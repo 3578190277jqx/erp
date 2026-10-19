@@ -10,6 +10,7 @@ from .permissions import scoped, accessible_organizations
 from .registry import MODULES
 from .time_display import local_timestamp
 from .audit_values import same_value, identity, list_identity, canonical_rows
+from .audit_types import audit_subject, audit_type_title
 
 LABELS = {
     'reason':'停止原因','attachment':'附件编号','attachments':'附件快照','sha256':'文件校验和',
@@ -18,12 +19,14 @@ LABELS = {
     'change':'变更申请快照','handoff':'交接快照','handoffs':'交接快照',
     'route_override':'管理员例外上传','target':'目标工厂','source_code':'源订单编号',
     'source_version':'源订单版本','lines':'产品明细','id':'记录 ID','name':'名称',
-    'line':'申请明细快照',
+    'line':'明细快照','plans':'分期计划','order':'合同订单',
     'archived_at':'停止共享时间','deleted_at':'删除时间',
     'attachment_state':'附件状态快照',
 }
 WRAPPERS = {'change':m.ChangeRequest,'handoff':m.Handoff,'handoffs':m.Handoff,
-            'attachment':m.Attachment,'attachments':m.Attachment,'attachment_state':m.Attachment}
+            'attachment':m.Attachment,'attachments':m.Attachment,'attachment_state':m.Attachment,
+            'plans':m.PaymentPlan}
+LINE_MODELS={m.Quote:m.QuoteLine,m.Purchase:m.PurchaseLine,m.Breakdown:m.BOMLine,m.ChangeRequest:m.ChangeLine}
 TIME_KEYS = {'archived_at','deleted_at','purged_at','created_at','updated_at'}
 
 
@@ -37,10 +40,13 @@ def field_for(model,key):
 def child_metadata(model,key):
     field=field_for(model,key)
     label=LABELS.get(key) or str(getattr(field,'verbose_name',key))
+    if key=='order' and field is not None and str(field.verbose_name)!='order':label=str(field.verbose_name)
     if model is m.Attachment and key=='archived_at':label='归档时间'
     if model is not None and field is not None and key=='version' and issubclass(model,m.Record):label='并发校验版本'
     child_model=WRAPPERS.get(key)
-    if key=='line' and model is m.ChangeRequest:child_model=m.ChangeLine
+    if key=='line':
+        child_model=LINE_MODELS.get(model)
+        if model is m.ChangeRequest:label='申请明细快照'
     if child_model is None and field is not None and field.is_relation:
         child_model=field.related_model
     return field,label,child_model
@@ -113,7 +119,7 @@ def display(row,names):
         return f'{name}（ID: {ref[1]}）' if name else f'ID: {ref[1]}（当前名称不可用）'
     field=row['field']
     path=row.get('path',())
-    if path and path[-1]=='object_type' and value in MODULES:return MODULES[value].title
+    if path and path[-1]=='object_type' and isinstance(value,str):return audit_type_title(value)
     if isinstance(field,models.DateTimeField) or path and path[-1] in TIME_KEYS:
         formatted=local_timestamp(value)
         if formatted is not None:return formatted
@@ -176,7 +182,7 @@ def compare_payloads(before,after,model,names):
 
 
 def audit_context(user,event,organization=None):
-    module=MODULES.get(event.object_type);model=module.model if module else None
+    model,_=audit_subject(event)
     stages=[];values=[]
     for title,value in [('变更前',event.before),('变更后',event.after)]:
         if not isinstance(value,(dict,list)):value={'内容':value}
@@ -207,25 +213,37 @@ def audit_context(user,event,organization=None):
     common={path for path in logical[0].keys() & logical[1].keys()
             if same_value(logical[0][path]['raw'],logical[1][path]['raw'])}
     shared=[dict(row,key=row['canonical_key']) for path,row in logical[0].items() if path in common]
+    # A known producer records the parent only as before-context. Absence of an
+    # after value does not prove it unchanged; never generalize to subject state.
+    parent_context=[row for row in recorded if row['stage']=='变更前' and row['path'][:1]==('handoff',)] \
+        if event.object_type=='handoffs' and event.action=='stop_sharing_attachment' and \
+           isinstance(values[0].get('handoff') if isinstance(values[0],dict) else None,dict) and \
+           isinstance(values[1],dict) and 'handoff' not in values[1] else []
+    context_paths={row['path'] for row in parent_context}
+    context_payloads=[{'title':'变更前','rows':parent_context}] if parent_context else []
     recorded_payloads=[]
     for index,payload in enumerate(snapshots):
-        rows=[r for r in recorded if r['stage']==payload['title']]
+        rows=[r for r in recorded if r['stage']==payload['title'] and not (r['stage']=='变更前' and r['path'] in context_paths)]
         complete=covers(rows,payload['rows'])
         payload['render_rows']=[row for path,row in logical[index].items() if path not in common]
         payload['partial']=len(payload['render_rows'])!=len(payload['rows'])
         payload['show']=bool(payload['render_rows'])
         if rows:recorded_payloads.append({'title':payload['title'],'rows':rows,'complete':complete})
     after_count=sum(r['stage']=='变更后' for r in recorded)
-    heading='本次写入' if is_write else '本次变更' if differences else '本次操作记录' if recorded else '校验信息更新' if technical else '本次变更'
+    heading='本次写入' if is_write else '本次变更' if differences else '本次操作记录'
     if is_write:summary=f'{len(write_rows)} 个记录字段'
     elif differences or technical:
         summary=(f'{len(differences)} 项业务变化' if differences else '')
         if technical:summary+=(' · ' if summary else '')+f'{len(technical)} 项校验信息更新'
         if after_count:summary+=f' · {after_count} 个补充字段'
     elif recorded:summary=f'{after_count} 个结果记录字段' if after_count else f'{len(recorded)} 个历史记录字段'
-    else:summary='0 项业务变化'
+    else:summary='未记录可比较字段变化'
+    missing_line=event.action in ('add_line','add_change_line') and not (
+        isinstance(event.after,dict) and isinstance(event.after.get('line'),dict) and event.after['line'])
     return {'audit_payloads':snapshots,'audit_differences':differences,
             'audit_technical_differences':technical,'audit_shared_rows':shared,
+            'audit_context_payloads':context_payloads,
+            'audit_evidence_warning':'本条增行事件未记录被添加的明细，无法从本条审计还原当时的物料、数量或单价。' if missing_line else '',
             'audit_is_write':is_write,'audit_write_rows':write_rows,'audit_heading':heading,'audit_summary':summary,
             'audit_recorded_fields':recorded,
             'audit_recorded_payloads':list(reversed(recorded_payloads)),

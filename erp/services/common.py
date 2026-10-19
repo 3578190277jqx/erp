@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import F
 from erp.models import AuditEvent
 from erp.permissions import require_access
+from erp.audit_types import audit_type_for
 
 
 def number(value, places=2, positive=False, nonnegative=False):
@@ -36,7 +37,7 @@ def snapshot(obj):
 
 def audit(user, obj, action, before=None, after=None):
     return AuditEvent.objects.create(organization=obj.organization, owner=user,
-                                    object_type=obj.module, object_id=obj.pk, code=obj.code,
+                                    object_type=audit_type_for(obj), object_id=obj.pk, code=obj.code,
                                     action=action, before=before or {}, after=after if after is not None else snapshot(obj))
 
 
