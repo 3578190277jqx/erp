@@ -1,3 +1,36 @@
+# 验证记录 · v1.1.11 十二次评审修正
+
+2026-10-19，功能c8200a0/6204ac8，复核修复7386c59。**262项：SQLite253通过/9个PG专用跳过，PostgreSQL261通过/1个SQLite备份专用跳过**。[复核修复五组CI](https://github.com/3578190277jqx/erp/actions/runs/39264506204)，真实日志已核对。最终文档交付的确切提交另在[PR Checks](https://github.com/3578190277jqx/erp/pull/1/checks)核验。
+
+- 新增16项，原246保留。一般报价/采购/BOM增删和变更增行记录真实行快照，读回落库Decimal；零元行、审计失败回滚、分期类型/元数据、旧证据识别、完整视图、范围/转义/时间均覆盖。
+- 一次独立复核：0Critical/1Important/1Minor，独立49相关项、全量261/9skip与4临时隔离探针通过。Important按新失败回归修复（14失败子项→GREEN），最终16与全量262通过；无二次复审。1Minor：新明细父级quote/purchase/breakdown标签英文，明确延后。
+- 原357审计两种模式全部渲染；0空标签、0业务未变断言；完整模式600张非空阶段表。全库43一般增行+8变更增行历史缺行快照，均提示，不回填。七个旧分期事件按完整证据正确解析。
+- Chrome1440桌面、390×844手机，旧增行、分期变化、完整快照三手机页无整页横向溢出。八张最终截图逐张检查；审计头部与操作时间同刻同格式，列表/CSV紧凑入口由自动回归保持。
+- 36表632业务/账号记录、9个文件路径/字节摘要前后一致；integrity_check=ok，无原库业务/审计/账号写入。原浏览器会话继续用，不修改last_login。
+- check、无迁移漂移、静态收集、diff通过，无新依赖/迁移；预览v1.1.11登录200。启用分期原父单级审计未扩展，本轮不宣称已覆盖全部期次创建证据。
+
+[BB1–BB6、四个取舍与复核边界裁定](V1111_TWELFTH_REVIEW_RESPONSE.md)。[直接打开GitHub开发代码](https://github.com/3578190277jqx/erp/tree/feat/furniture-erp)，默认main尚未合并。
+
+![旧增行明确证据缺失而非业务未变](screenshots/v1111-missing-line.png)
+
+![分期金额变化与技术版本分开](screenshots/v1111-plan-differences.png)
+
+![历史分期事件正确显示分期收款计划](screenshots/v1111-plan-subject.png)
+
+![独立完整中文快照视图](screenshots/v1111-full-chinese-snapshot.png)
+
+![停止共享父单上下文仅前侧记录](screenshots/v1111-parent-context.png)
+
+![手机旧增行证据说明](screenshots/v1111-mobile-evidence.png)
+
+![手机分期金额逐字段对比](screenshots/v1111-mobile-plans.png)
+
+![手机完整中文阶段快照](screenshots/v1111-mobile-full-snapshot.png)
+
+---
+
+以下为对应版本历史验证，数字与行为代表当时状态。
+
 # 验证记录 · v1.1.10 十一次评审修正
 
 2026-10-19 交付核验，功能提交 `f2fbb06`。**246项：SQLite237通过/9个PG专用跳过，PostgreSQL245通过/1个SQLite备份专用跳过**。[功能提交五组CI成功](https://github.com/3578190277jqx/erp/actions/runs/39136616107)，实际输出已下载核对。最终交付提交另在[原PR Checks](https://github.com/3578190277jqx/erp/pull/1/checks)按确切提交核验。
