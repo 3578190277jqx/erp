@@ -4,6 +4,8 @@
   <p class="audit-reference-note subtle">关联名称为当前可见资料，不代表操作当时的名称；原始 ID 始终保留。</p>
   <p class="audit-reference-note">{% if audit_full_view %}<a class="text-link" href="{% url 'detail' 'audit' obj.pk %}">返回变化摘要</a>{% else %}<a class="text-link" href="?audit_view=full">查看完整中文快照</a>{% endif %}</p>
   {% if audit_evidence_warning %}<p class="audit-reference-note">{{ audit_evidence_warning }}</p>{% endif %}
+  {% for note in audit_normalization_notes %}<p class="audit-reference-note subtle">{{ note }}</p>{% endfor %}
+  {% if audit_line_operation %}<p class="audit-reference-note">本条已记录{{ audit_line_operation.verb }}的{{ audit_line_operation.noun }}：{{ audit_line_operation.description }}。</p>{% endif %}
   {% if not audit_full_view %}
   {% if audit_is_write %}
   <div class="table-scroll"><table class="data-table"><thead><tr><th>字段</th><th>写入内容</th></tr></thead><tbody>
@@ -14,7 +16,8 @@
   <div class="audit-differences">{% for row in audit_differences %}
     <div class="audit-diff-row"><h3>{{ row.key }}</h3><div class="audit-diff-values"><div><small>变更前</small><pre class="audit-value">{{ row.before }}</pre></div><div><small>变更后</small><pre class="audit-value">{{ row.after }}</pre></div></div>{% if row.note %}<p class="subtle">{{ row.note }}</p>{% endif %}</div>
   {% endfor %}</div>
-  {% elif audit_recorded_fields %}<p class="feature-empty">本次操作记录见下方；历史载荷结构不同，不据此推断字段增删。</p>
+  {% elif audit_line_operation %}<p class="feature-empty">所涉明细快照见下方，或切换完整中文快照核对。</p>
+  {% elif audit_recorded_fields %}<p class="feature-empty">载荷仅在一侧记录的内容见下方，不据此推断字段增删。</p>
   {% elif audit_technical_differences %}<p class="feature-empty">当前载荷仅显示并发校验版本变化，不能据此认定业务未发生变化。明细或关联记录可能未记录，请结合动作及相关事件核对。</p>
   {% else %}<p class="feature-empty">本次载荷未显示可比较字段变化，不据此判断业务是否变化。</p>{% endif %}
   {% endif %}
@@ -22,7 +25,8 @@
 {% if audit_full_view %}
 {% for payload in audit_payloads %}{% if payload.rows %}
 <details class="panel audit-panel audit-snapshot">
-  <summary>完整{{ payload.title }}快照 · {{ payload.rows|length }} 个字段</summary>
+  <summary>完整{{ payload.title }}快照 · {{ payload.rows|length }} 个字段{% if payload.context_note %} · 含父单据上下文{% endif %}</summary>
+  {% if payload.context_note %}<p class="audit-reference-note subtle">{{ payload.context_note }}</p>{% endif %}
   <div class="table-scroll"><table class="data-table"><thead><tr><th>字段</th><th>记录内容</th></tr></thead><tbody>
   {% for row in payload.rows %}<tr><th scope="row">{{ row.key }}</th><td><pre class="audit-value">{{ row.value }}</pre></td></tr>{% endfor %}
   </tbody></table></div>

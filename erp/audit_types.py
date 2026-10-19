@@ -1,5 +1,6 @@
 """Audit subject identity, independent of permission and navigation modules."""
 from decimal import Decimal
+import re
 from django.core.exceptions import ValidationError
 from . import models as m
 from .audit_values import identity
@@ -46,3 +47,23 @@ def audit_type_title(key):
     if key==PLAN_TYPE:return PLAN_TITLE
     module=MODULES.get(key)
     return module.title if module else key
+
+
+def normalize_stage(event,payload):
+    """Interpret a known legacy stage without modifying its stored JSON or subject."""
+    fingerprint={'id','code','organization','object_type','object_id','file','original_name','sha256','kind','size'}
+    if event.action!='delete_attachment' or not isinstance(payload,dict) or not fingerprint<=payload.keys():
+        return payload,''
+    if (event.object_type not in MODULES or payload['object_type']!=event.object_type or
+        identity(payload['object_id'],'id') is None or identity(payload['object_id'],'id')!=identity(event.object_id,'id') or
+        identity(payload['organization'],'id') is None or identity(payload['organization'],'id')!=identity(event.organization_id,'id') or
+        identity(payload['id'],'id') is None or identity(payload['code'],'code') is None):
+        return payload,''
+    if not all(isinstance(payload[key],str) and payload[key].strip() for key in ('file','original_name','sha256')):
+        return payload,''
+    if not re.fullmatch(r'[0-9a-fA-F]{64}',payload['sha256']):return payload,''
+    if payload['kind'] not in ('drawing','photo','contract'):return payload,''
+    size=payload['size']
+    if isinstance(size,bool) or not isinstance(size,(str,int)) or not str(size).isascii() or not str(size).isdigit():
+        return payload,''
+    return {'attachment_state':payload},'旧扁平附件载荷按附件字段解释，原始 JSON 保留原结构。'

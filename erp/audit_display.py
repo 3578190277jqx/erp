@@ -10,7 +10,8 @@ from .permissions import scoped, accessible_organizations
 from .registry import MODULES
 from .time_display import local_timestamp
 from .audit_values import same_value, identity, list_identity, canonical_rows
-from .audit_types import audit_subject, audit_type_title
+from .audit_types import audit_subject, audit_type_title, normalize_stage
+from .line_metadata import LINE_SPECS, ROW_SPECS
 
 LABELS = {
     'reason':'停止原因','attachment':'附件编号','attachments':'附件快照','sha256':'文件校验和',
@@ -26,7 +27,6 @@ LABELS = {
 WRAPPERS = {'change':m.ChangeRequest,'handoff':m.Handoff,'handoffs':m.Handoff,
             'attachment':m.Attachment,'attachments':m.Attachment,'attachment_state':m.Attachment,
             'plans':m.PaymentPlan}
-LINE_MODELS={m.Quote:m.QuoteLine,m.Purchase:m.PurchaseLine,m.Breakdown:m.BOMLine,m.ChangeRequest:m.ChangeLine}
 TIME_KEYS = {'archived_at','deleted_at','purged_at','created_at','updated_at'}
 
 
@@ -40,13 +40,16 @@ def field_for(model,key):
 def child_metadata(model,key):
     field=field_for(model,key)
     label=LABELS.get(key) or str(getattr(field,'verbose_name',key))
+    row_spec=ROW_SPECS.get(model)
+    if row_spec and key==row_spec.parent_field:label=row_spec.parent_label
     if key=='order' and field is not None and str(field.verbose_name)!='order':label=str(field.verbose_name)
     if model is m.Attachment and key=='archived_at':label='归档时间'
     if model is not None and field is not None and key=='version' and issubclass(model,m.Record):label='并发校验版本'
     child_model=WRAPPERS.get(key)
     if key=='line':
-        child_model=LINE_MODELS.get(model)
-        if model is m.ChangeRequest:label='申请明细快照'
+        spec=LINE_SPECS.get(model)
+        child_model=spec.model if spec else None
+        if spec:label=spec.snapshot_label
     if child_model is None and field is not None and field.is_relation:
         child_model=field.related_model
     return field,label,child_model
@@ -118,6 +121,8 @@ def display(row,names):
         name=names.get(ref)
         return f'{name}（ID: {ref[1]}）' if name else f'ID: {ref[1]}（当前名称不可用）'
     field=row['field']
+    if isinstance(field,models.FileField) and field.model is m.Attachment:
+        return '私有文件（存储路径见原始 JSON）'
     path=row.get('path',())
     if path and path[-1]=='object_type' and isinstance(value,str):return audit_type_title(value)
     if isinstance(field,models.DateTimeField) or path and path[-1] in TIME_KEYS:
@@ -181,10 +186,36 @@ def compare_payloads(before,after,model,names):
     return differences,recorded
 
 
+def line_operation(event,values,model,names):
+    actions={'add_line':('变更后','新增'),'delete_line':('变更前','移除'),
+             'add_change_line':('变更后','新增'),'remove_change_line':('变更前','移除')}
+    action=actions.get(event.action);spec=LINE_SPECS.get(model)
+    if action is None or spec is None:return None
+    if event.action in ('add_line','delete_line') and not spec.generic_editor:return None
+    if event.action in ('add_change_line','remove_change_line') and model is not m.ChangeRequest:return None
+    stage,verb=action;index=1 if stage=='变更后' else 0
+    value,other=values[index],values[1-index]
+    if not isinstance(value,dict) or not isinstance(other,dict) or 'line' in other:return None
+    row=value.get('line')
+    if not isinstance(row,dict):return None
+    row_id=identity(row.get('id'),'id');parent_id=identity(row.get(spec.parent_field),'id')
+    if row_id is None or parent_id is None or parent_id!=identity(event.object_id,'id'):return None
+    name=row.get('name')
+    if not isinstance(name,str) or not name.strip():
+        name=''
+        if identity(row.get('material'),'id') is not None:
+            name=display({'raw':row['material'],'field':field_for(spec.model,'material'),'path':('line','material')},names)
+    noun='申请明细' if model is m.ChangeRequest else '明细'
+    description=(name+' · ' if name else '')+f'明细 ID: {row_id}'
+    return {'title':f'{verb} 1 条{noun}','verb':verb,'noun':noun,'stage':stage,'description':description}
+
+
 def audit_context(user,event,organization=None):
     model,_=audit_subject(event)
-    stages=[];values=[]
+    stages=[];values=[];normalization_notes=[]
     for title,value in [('变更前',event.before),('变更后',event.after)]:
+        value,note=normalize_stage(event,value)
+        if note:normalization_notes.append(f'{title}：{note}')
         if not isinstance(value,(dict,list)):value={'内容':value}
         values.append(value)
         stages.append((title,list(flatten(value,model))))
@@ -193,6 +224,7 @@ def audit_context(user,event,organization=None):
     all_differences,recorded=compare_payloads(*values,model,names)
     differences=[r for r in all_differences if not r.get('technical')]
     technical=[r for r in all_differences if r.get('technical')]
+    operation=line_operation(event,values,model,names)
     is_write=not values[0]
     write_rows=[dict(row,value=display(row,names)) for row in flatten(values[1],model,summary_lists=True)] if is_write else []
 
@@ -228,21 +260,28 @@ def audit_context(user,event,organization=None):
         payload['render_rows']=[row for path,row in logical[index].items() if path not in common]
         payload['partial']=len(payload['render_rows'])!=len(payload['rows'])
         payload['show']=bool(payload['render_rows'])
+        payload['context_note']='含操作时父单据上下文（交接快照），仅前侧有记录；未记录的后值不作推断。' \
+            if payload['title']=='变更前' and parent_context else ''
         if rows:recorded_payloads.append({'title':payload['title'],'rows':rows,'complete':complete})
-    after_count=sum(r['stage']=='变更后' for r in recorded)
-    heading='本次写入' if is_write else '本次变更' if differences else '本次操作记录'
-    if is_write:summary=f'{len(write_rows)} 个记录字段'
-    elif differences or technical:
-        summary=(f'{len(differences)} 项业务变化' if differences else '')
-        if technical:summary+=(' · ' if summary else '')+f'{len(technical)} 项校验信息更新'
-        if after_count:summary+=f' · {after_count} 个补充字段'
-    elif recorded:summary=f'{after_count} 个结果记录字段' if after_count else f'{len(recorded)} 个历史记录字段'
-    else:summary='未记录可比较字段变化'
+    counted=[r for r in recorded if not (r['stage']=='变更前' and r['path'] in context_paths)
+             and not (operation and r['stage']==operation['stage'] and r['path'][:1]==('line',))]
+    after_count=sum(r['stage']=='变更后' for r in counted)
+    before_count=sum(r['stage']=='变更前' for r in counted)
+    heading='本次变更' if operation else '本次写入' if is_write else '本次变更' if differences else '本次操作记录'
+    if is_write and not operation:summary=f'{len(write_rows)} 个记录字段'
+    else:
+        parts=[operation['title']] if operation else []
+        if differences:parts.append(f'{len(differences)} 项业务变化')
+        if technical:parts.append(f'{len(technical)} 项校验信息更新')
+        if after_count:parts.append(f'{after_count} 个结果字段')
+        if before_count:parts.append(f'{before_count} 个操作前字段')
+        summary=' · '.join(parts) or '未记录可比较字段变化'
     missing_line=event.action in ('add_line','add_change_line') and not (
         isinstance(event.after,dict) and isinstance(event.after.get('line'),dict) and event.after['line'])
     return {'audit_payloads':snapshots,'audit_differences':differences,
             'audit_technical_differences':technical,'audit_shared_rows':shared,
             'audit_context_payloads':context_payloads,
+            'audit_line_operation':operation,'audit_normalization_notes':normalization_notes,
             'audit_evidence_warning':'本条增行事件未记录被添加的明细，无法从本条审计还原当时的物料、数量或单价。' if missing_line else '',
             'audit_is_write':is_write,'audit_write_rows':write_rows,'audit_heading':heading,'audit_summary':summary,
             'audit_recorded_fields':recorded,

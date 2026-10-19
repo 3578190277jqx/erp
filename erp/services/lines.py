@@ -1,20 +1,20 @@
 from decimal import Decimal
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from erp.models import Quote, QuoteLine, Purchase, PurchaseLine, Breakdown, BOMLine
+from erp.models import Quote, Purchase, Breakdown
+from erp.line_metadata import LINE_SPECS
 from erp.permissions import require_access
 from .common import lock, snapshot, save_version, audit, number
-
-LINE_MODELS = {Quote: (QuoteLine, 'quote'), Purchase: (PurchaseLine, 'purchase'), Breakdown: (BOMLine, 'breakdown')}
 
 
 @transaction.atomic
 def add_line(user, document, values, version, delete_id=None):
     document = lock(user, document, 'edit', version)
-    if type(document) not in LINE_MODELS or document.status not in ('draft', 'rejected'):
+    spec=LINE_SPECS.get(type(document))
+    if spec is None or not spec.generic_editor or document.status not in ('draft', 'rejected'):
         raise ValidationError('单据已冻结，不能再修改明细。')
     before = snapshot(document)
-    model, key = LINE_MODELS[type(document)]
+    model, key = spec.model,spec.parent_field
     allowed = {'name', 'room', 'specification', 'quantity', 'unit', 'unit_price','pricing_mode','category',
                'width_mm','height_mm','unit_cost','discountable'} if isinstance(document, Quote) else (
         {'material', 'quantity', 'waste','order_line'} if isinstance(document, Breakdown) else {'material', 'quantity', 'unit_price'})

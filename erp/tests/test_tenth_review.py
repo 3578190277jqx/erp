@@ -46,7 +46,7 @@ class GovernanceOutcomeTests(TenthReviewFixture):
         self.assertEqual(shown.stop_actor,self.manager.username)
         audit_page=self.page(event)
         self.assertEqual(audit_page.status_code,200)
-        self.assertContains(audit_page,'2 项业务变化 · 1 项校验信息更新 · 3 个补充字段')
+        self.assertContains(audit_page,'2 项业务变化 · 1 项校验信息更新 · 3 个结果字段')
         self.assertContains(audit_page,'人工停止共享')
 
     def test_delete_compares_version_and_explicit_delete_time_and_keeps_flat_keys(self):
@@ -63,7 +63,7 @@ class GovernanceOutcomeTests(TenthReviewFixture):
         technical=self.context(event)['audit_technical_differences']
         self.assertEqual(len(technical),1)
         self.assertEqual(technical[0]['before'],'1');self.assertEqual(technical[0]['after'],'2')
-        self.assertContains(self.page(event),'1 项业务变化 · 1 项校验信息更新 · 1 个补充字段')
+        self.assertContains(self.page(event),'1 项业务变化 · 1 项校验信息更新 · 1 个结果字段')
 
     def test_audit_write_failure_rolls_back_attachment_and_epoch(self):
         item=self.upload(self.receiver)
@@ -130,7 +130,7 @@ class AuditOutcomePresentationTests(TenthReviewFixture):
                          {'attachment':'A','reason':'误传','archived_at':'2026-10-18T03:44:41Z'})
         response=self.page(event)
         self.assertContains(response,'<h2>本次操作记录</h2>',html=True)
-        self.assertContains(response,'3 个结果记录字段')
+        self.assertContains(response,'3 个结果字段')
         self.assertNotContains(response,'0 项可比变化')
         self.assertEqual(response.context['audit_differences'],[])
 
