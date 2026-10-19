@@ -219,4 +219,3 @@ class AuditViewTests(EighthReviewFixture):
             self.assertContains(response,'2026-10-19 08:01:02+08:00',count=2)
             ordinary=self.client.get(f'/modules/handoffs/{self.handoff.pk}/')
             self.assertEqual(ordinary.context['detail_timestamp'],'2026-10-19 08:01')
-
