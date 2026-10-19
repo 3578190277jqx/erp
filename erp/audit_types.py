@@ -1,4 +1,6 @@
 """Audit subject identity, independent of permission and navigation modules."""
+from decimal import Decimal
+from django.core.exceptions import ValidationError
 from . import models as m
 from .audit_values import identity
 from .registry import MODULES
@@ -16,7 +18,7 @@ def _legacy_plan(event):
     if event.object_type!='finance' or event.action not in ('revise_payment_plan','reschedule_payment_plan'):
         return False
     target=identity(event.object_id,'id')
-    if target is None:return False
+    if target is None or identity(event.code,'code') is None:return False
     for payload in (event.before,event.after):
         if not isinstance(payload,dict) or not {'id','code','order','sequence','gate','amount'}<=payload.keys():
             return False
@@ -26,6 +28,10 @@ def _legacy_plan(event):
         if identity(payload['sequence'],'id') is None or identity(payload['order'],'id') is None:
             return False
         if payload['gate'] not in ('start','ship','complete'):return False
+        value=payload['amount']
+        if isinstance(value,bool) or not isinstance(value,(str,int,float,Decimal)):return False
+        try:m.PaymentPlan._meta.get_field('amount').clean(str(value),None)
+        except ValidationError:return False
     return True
 
 

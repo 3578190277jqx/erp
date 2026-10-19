@@ -155,6 +155,25 @@ class PlanAuditTests(ERPTestCase):
                                 action='revise_payment_plan',before=before,after=after)
                 self.assertEqual(display_value(event,'object_type'),'财务对账')
 
+    def test_malformed_legacy_money_and_blank_codes_stay_generic(self):
+        plan=self.plans[0];base=snapshot(plan)
+        for amount in (None,True,False,{},[], '', 'bad','NaN','Infinity','-Infinity','-1','1.234','1e15'):
+            with self.subTest(amount=amount):
+                payload=dict(base,amount=amount)
+                event=self.make(m.AuditEvent,object_type='finance',object_id=plan.pk,code=plan.code,
+                                action='revise_payment_plan',before=payload,after=payload)
+                self.assertEqual(display_value(event,'object_type'),'财务对账')
+        for code in ('','   '):
+            payload=dict(base,code=code)
+            event=self.make(m.AuditEvent,object_type='finance',object_id=plan.pk,code=code,
+                            action='revise_payment_plan',before=payload,after=payload)
+            self.assertEqual(display_value(event,'object_type'),'财务对账')
+        for amount in ('300.00',300,300.0,0.1,'0.00'):
+            payload=dict(base,amount=amount)
+            event=self.make(m.AuditEvent,object_type='finance',object_id=plan.pk,code=plan.code,
+                            action='revise_payment_plan',before=payload,after=payload)
+            self.assertEqual(display_value(event,'object_type'),'分期收款计划')
+
 
 class AuditViewTests(EighthReviewFixture):
     def event(self,before,after,**kwargs):
