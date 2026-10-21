@@ -1,3 +1,36 @@
+# 验证记录 · v1.1.12 十三次评审修正
+
+2026-10-21，功能 `eefe5d2`，独立复核后修复 `d0ba071`。**277项：SQLite268通过/9个PG专用跳过，PostgreSQL276通过/1个SQLite备份专用跳过**。[功能修复五组CI](https://github.com/3578190277jqx/erp/actions/runs/39604912528)已逐份日志核对；最终文档提交另在[原PR Checks](https://github.com/3578190277jqx/erp/pull/1/checks)核验确切SHA。
+
+- 新增15方法，原262保留。旧附件指纹正反例、双阶段/原始JSON/文件占位、范围与转义；一般零元/非零增删、申请增删、未知/错父/双侧证据；平衡计数、完整上下文及通用编辑器边界均覆盖。
+- 一次完成的独立复核0Critical/1Important/0Minor，独立42相关项与276全量通过（9跳过），另90个标量探针通过。Important父单身份矛盾用48失败子场景复现→修复→GREEN；15相关/277全量通过。无二次复审、无延后Minor；首次中断未完成的尝试不计为完整复核。
+- 357历史审计两种视图全部渲染，600张非空完整阶段表；0空差异标签、0错误业务未变结论、51旧缺行提示保留。271/343按附件解释；331/332/353识别申请行移除。350为5结果+15操作前字段、另10父上下文，完整25字段明确注释。
+- Chrome1440桌面、390×844手机；271/331摘要和350完整视图手机scrollWidth均390。下面八张10-21最终实拍已逐张查看；重拍了滚动/缩放影响的截图，无页面代码改动。全页长图的固定底部导航出现在视口对应位置。
+- 本轮开始前、恢复与截图后36表632业务/账号记录摘要一致，9文件路径/字节摘要一致，357审计不变，integrity_check=ok。只写认证会话，未改密码/last_login，未写原库业务/审计或点击CSV导出。
+- check0issues、无迁移漂移、静态收集、diff通过，无新依赖/迁移；本地预览v1.1.12，登录200。原期次创建父单级事件扩展未纳入本轮；原始授权JSON仍保留路径，不宣称路径已从源证据移除。
+
+[CC1–CC6、七项取舍与详细验证](V1112_THIRTEENTH_REVIEW_RESPONSE.md)。[直接打开开发代码](https://github.com/3578190277jqx/erp/tree/feat/furniture-erp)，默认main尚未合并。
+
+![旧删除附件恢复类型与路径占位](screenshots/v1112-legacy-attachment.png)
+
+![申请明细移除独立呈现](screenshots/v1112-request-line-operation.png)
+
+![操作前与结果字段分别计数](screenshots/v1112-balanced-evidence.png)
+
+![完整视图保留父上下文说明](screenshots/v1112-full-context.png)
+
+![完整附件快照仍保留全部记录](screenshots/v1112-attachment-full.png)
+
+![手机旧附件中文与私有路径占位](screenshots/v1112-mobile-attachment.png)
+
+![手机申请行移除摘要](screenshots/v1112-mobile-operation.png)
+
+![手机完整父上下文说明](screenshots/v1112-mobile-context.png)
+
+---
+
+以下为对应版本历史验证，数字与行为代表当时状态。
+
 # 验证记录 · v1.1.11 十二次评审修正
 
 2026-10-19，功能c8200a0/6204ac8，复核修复7386c59。**262项：SQLite253通过/9个PG专用跳过，PostgreSQL261通过/1个SQLite备份专用跳过**。[复核修复五组CI](https://github.com/3578190277jqx/erp/actions/runs/39264506204)，真实日志已核对。最终文档交付的确切提交另在[PR Checks](https://github.com/3578190277jqx/erp/pull/1/checks)核验。
