@@ -200,6 +200,17 @@ def line_operation(event,values,model,names):
     if not isinstance(row,dict):return None
     row_id=identity(row.get('id'),'id');parent_id=identity(row.get(spec.parent_field),'id')
     if row_id is None or parent_id is None or parent_id!=identity(event.object_id,'id'):return None
+    for phase in values:
+        parents=[phase]
+        if model is m.ChangeRequest and 'change' in phase:
+            if not isinstance(phase['change'],dict):return None
+            parents.append(phase['change'])
+        for parent in parents:
+            for key,expected in (('id',event.object_id),('organization',event.organization_id)):
+                if key in parent and (identity(parent[key],'id') is None or identity(parent[key],'id')!=identity(expected,'id')):
+                    return None
+            if 'code' in parent and (identity(parent['code'],'code') is None or parent['code']!=event.code):
+                return None
     name=row.get('name')
     if not isinstance(name,str) or not name.strip():
         name=''

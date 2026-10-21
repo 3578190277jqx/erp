@@ -150,6 +150,35 @@ class LineOperationTests(ThirteenthFixture):
         response=self.page(self.event({'version':'1'},{'version':'2','line':row},action='add_line',object_type='quotes'))
         self.assertNotContains(response,'<script>row()</script>');self.assertContains(response,'&lt;script&gt;row()&lt;/script&gt;')
 
+    def test_contradictory_parent_snapshots_do_not_claim_line_movements(self):
+        quote=self.make(m.Quote,customer=self.customer,title='父单核验')
+        purchase=self.make(m.Purchase,warehouse=self.warehouse,supplier='供应商')
+        breakdown=self.make(m.Breakdown,order=self.source,quantity=1)
+        change=self.make(m.ChangeRequest,order=self.source,order_version=self.source.version,
+            proposed_total=self.source.total,proposed_due_date=self.source.due_date)
+        for parent,parent_field in [(quote,'quote'),(purchase,'purchase'),(breakdown,'breakdown'),(change,'change')]:
+            for added in (True,False):
+                action=('add_change_line' if added else 'remove_change_line') if parent is change else ('add_line' if added else 'delete_line')
+                row={'id':'1',parent_field:str(parent.pk),'name':'有身份的明细'}
+                before,after=deepcopy(snapshot(parent)),deepcopy(snapshot(parent))
+                if parent is change and not added:before,after={'change':before},{'change':after}
+                (after if added else before)['line']=row
+                good=self.event(before,after,action=action,object_type=parent.module,object_id=parent.pk,code=parent.code)
+                self.assertTrue(self.context(good)['audit_line_operation'])
+                for stage in ('before','after'):
+                    for key,bad_value in [('id','999999'),('code','OTHER-DOCUMENT'),('organization','999999')]:
+                        with self.subTest(model=type(parent),action=action,stage=stage,key=key):
+                            left,right=deepcopy(before),deepcopy(after)
+                            target=left if stage=='before' else right
+                            if parent is change and not added:target=target['change']
+                            target[key]=bad_value
+                            event=self.event(left,right,action=action,object_type=parent.module,object_id=parent.pk,code=parent.code)
+                            context=self.context(event)
+                            self.assertFalse(context['audit_line_operation'])
+                            self.assertNotIn('新增 1 条',context['audit_summary'])
+                            self.assertNotIn('移除 1 条',context['audit_summary'])
+                            event.refresh_from_db();self.assertEqual(event.before,left);self.assertEqual(event.after,right)
+
     def test_shared_specs_do_not_enable_generic_change_request_editing(self):
         change=self.make(m.ChangeRequest,order=self.source,order_version=self.source.version,
             proposed_total=self.source.total,proposed_due_date=self.source.due_date,status='rejected')
