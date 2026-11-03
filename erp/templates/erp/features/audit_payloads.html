@@ -8,7 +8,7 @@
   {% if audit_line_operation %}<p class="audit-reference-note">本条已记录{{ audit_line_operation.verb }}的{{ audit_line_operation.noun }}：{{ audit_line_operation.description }}。</p>{% endif %}
   {% if audit_attachment_operation %}<p class="audit-reference-note">{{ audit_attachment_operation.title }}：{{ audit_attachment_operation.code }} · 记录时间 {{ audit_attachment_operation.time }}。该操作记录不代表缺失的前后状态已补齐。</p>{% endif %}
   {% if not audit_full_view %}
-  {% for row in audit_operation_notes %}<p class="audit-reference-note subtle">操作说明 · {{ row.key }}：{{ row.value }}</p>{% endfor %}
+  {% for row in audit_operation_notes %}<p class="audit-reference-note subtle">操作说明{% if audit_operation_notes|length > 1 %}（{{ row.stage }}）{% endif %} · {{ row.key }}：{{ row.value }}</p>{% endfor %}
   {% if audit_is_write %}
   <div class="table-scroll"><table class="data-table"><thead><tr><th>字段</th><th>写入内容</th></tr></thead><tbody>
     {% for row in audit_write_rows %}<tr><th scope="row">{{ row.key }}</th><td><pre class="audit-value">{{ row.value }}</pre></td></tr>

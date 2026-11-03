@@ -142,6 +142,58 @@ class AttachmentPairTests(ThirteenthFixture):
                 normalized,note=normalize_stage(event,dict(payload,kind=kind))
                 self.assertNotIn('attachment_state',normalized);self.assertEqual(note,'')
 
+    def test_second_alias_of_any_type_never_overwrites_recorded_evidence(self):
+        event=self.stop_event();before=deepcopy(event.before)
+        for value in (None,False,[],{},'明确记录的值'):
+            with self.subTest(value=value):
+                event.before=dict(before,attachment_state=value)
+                original=deepcopy(event.before);context=self.context(event)
+                self.assertFalse(context['audit_attachment_operation'])
+                row=next(r for r in context['audit_payloads'][0]['rows'] if r['path']==('attachment_state',))
+                self.assertEqual(row['raw'],value)
+                self.assertEqual(event.before,original)
+
+    def test_rejected_attachment_pairs_keep_separate_facts_and_other_real_changes(self):
+        item=self.upload(self.receiver)
+        evidence.stop_sharing_attachment(self.manager,item,item.version,self.handoff.version,'复核边界')
+        event=m.AuditEvent.objects.get(action='stop_sharing_attachment')
+        before=deepcopy(event.before);after=deepcopy(event.after)
+        for key,value in [('id','999999'),('code','OTHER'),('sha256','b'*64),
+                          ('organization','999999'),('object_id','999999'),('object_type','orders')]:
+            with self.subTest(key=key):
+                event.before=dict(deepcopy(before),note='真实前说明')
+                event.after=dict(deepcopy(after),note='真实后说明')
+                event.after['attachment_state'][key]=value
+                context=self.context(event)
+                self.assertFalse(context['audit_attachment_operation'])
+                self.assertEqual([r['key'] for r in context['audit_differences']],['备注 / 处理结论'])
+                self.assertFalse(context['audit_technical_differences'])
+                self.assertTrue(any(r['stage']=='变更前' and r['path'][:1]==('attachment_state',)
+                    for r in context['audit_recorded_fields']))
+                self.assertTrue(any(r['stage']=='变更后' and r['path'][:1]==('attachment_state',)
+                    for r in context['audit_recorded_fields']))
+
+    def test_all_known_parent_aliases_and_flat_parent_fields_must_match(self):
+        event=self.stop_event();before=deepcopy(event.before);after=deepcopy(event.after)
+        for side in ('before','after'):
+            for wrapper,value in [('handoffs',{'id':'999999'}),('handoffs',None),('handoff',[]),
+                                  ('object_id','999999'),('object_type','orders')]:
+                with self.subTest(side=side,wrapper=wrapper):
+                    event.before=deepcopy(before);event.after=deepcopy(after)
+                    getattr(event,side)[wrapper]=value
+                    self.assertFalse(self.context(event)['audit_attachment_operation'])
+
+    def test_two_sided_policy_is_staged_prose_not_a_business_change(self):
+        event=self.stop_event();event.before['policy']='之前的处理说明'
+        context=self.context(event)
+        self.assertEqual(context['audit_differences'],[])
+        self.assertEqual({r['stage']:r['value'] for r in context['audit_operation_notes']},
+                         {'变更前':'之前的处理说明','变更后':event.after['policy']})
+        self.assertIn('2 个结果字段',context['audit_summary'])
+        event.save(update_fields=['before'])
+        self.assertContains(self.page(event),'操作说明（变更前）')
+        self.assertContains(self.page(event),'操作说明（变更后）')
+
 
 class LineEditorSchemaTests(ThirteenthFixture):
     def test_real_forms_keep_fields_cost_hiding_and_material_scope(self):

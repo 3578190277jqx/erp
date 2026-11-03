@@ -10,7 +10,8 @@ from .permissions import scoped, accessible_organizations
 from .registry import MODULES
 from .time_display import local_timestamp
 from .audit_values import same_value, identity, list_identity, canonical_rows
-from .audit_types import audit_subject, audit_type_title, normalize_stage, normalize_attachment_transition
+from .audit_types import (audit_subject, audit_type_title, normalize_stage,
+                          normalize_attachment_transition, attachment_comparison_allowed)
 from .line_metadata import LINE_SPECS, ROW_SPECS
 
 LABELS = {
@@ -136,7 +137,7 @@ def display(row,names):
     return str(value)
 
 
-def compare_payloads(before,after,model,names):
+def compare_payloads(before,after,model,names,compare_attachments=True):
     differences=[];recorded=[]
 
     def record(stage,value,model,path,labels,field):
@@ -146,6 +147,10 @@ def compare_payloads(before,after,model,names):
     def compare(a,b,model,path=(),labels=(),field=None,other_path=None):
         if other_path is None:other_path=path
         if same_value(a,b):return
+        if model is m.Attachment and not compare_attachments and (isinstance(a,dict) or isinstance(b,dict)):
+            record('变更前',a,model,path,labels,field)
+            record('变更后',b,model,other_path,labels,field)
+            return
         if isinstance(a,dict) and isinstance(b,dict):
             for key in dict.fromkeys([*a,*b]):
                 child_field,label,child_model=child_metadata(model,str(key))
@@ -237,11 +242,14 @@ def audit_context(user,event,organization=None):
     stages=[(title,list(flatten(value,model))) for title,value in zip(('变更前','变更后'),values)]
     names=reference_names(user,event,organization,[row for _,rows in stages for row in rows])
     snapshots=[{'title':title,'rows':[dict(row,value=display(row,names)) for row in rows]} for title,rows in stages]
-    all_differences,recorded=compare_payloads(*values,model,names)
-    differences=[r for r in all_differences if not r.get('technical')]
+    comparable=attachment_comparison_allowed(event,*values,attachment_operation)
+    all_differences,recorded=compare_payloads(*values,model,names,compare_attachments=comparable)
+    operation_notes=[dict(row,stage=payload['title']) for payload in snapshots for row in payload['rows']
+                     if attachment_operation and row['path']==('policy',) and isinstance(row['raw'],str)]
+    note_paths={(row['stage'],row['path']) for row in operation_notes}
+    differences=[r for r in all_differences if not r.get('technical') and not (
+        r.get('before_path')==('policy',) and r.get('after_path')==('policy',) and len(operation_notes)==2)]
     technical=[r for r in all_differences if r.get('technical')]
-    operation_notes=[r for r in recorded if attachment_operation and r['stage']=='变更后'
-                     and r['path']==('policy',) and isinstance(r['raw'],str)]
     operation=line_operation(event,values,model,names)
     is_write=not values[0]
     write_rows=[dict(row,value=display(row,names)) for row in flatten(values[1],model,summary_lists=True)] if is_write else []
@@ -251,6 +259,8 @@ def audit_context(user,event,organization=None):
         return bool(left) and same_value(left,right)
 
     covered=[{r['path']:r['raw'] for r in recorded if r['stage']==title} for title in ('变更前','变更后')]
+    for index,title in enumerate(('变更前','变更后')):
+        covered[index].update({r['path']:r['raw'] for r in operation_notes if r['stage']==title})
     if is_write:covered[1].update({r['path']:r['raw'] for r in write_rows})
     for row in all_differences:
         if 'before_path' in row:
@@ -273,7 +283,7 @@ def audit_context(user,event,organization=None):
     context_payloads=[{'title':'变更前','rows':parent_context}] if parent_context else []
     recorded_payloads=[]
     for index,payload in enumerate(snapshots):
-        rows=[r for r in recorded if r['stage']==payload['title'] and r not in operation_notes
+        rows=[r for r in recorded if r['stage']==payload['title'] and (r['stage'],r['path']) not in note_paths
               and not (r['stage']=='变更前' and r['path'] in context_paths)]
         complete=covers(rows,payload['rows'])
         payload['render_rows']=[row for path,row in logical[index].items() if path not in common]
@@ -283,7 +293,7 @@ def audit_context(user,event,organization=None):
             if payload['title']=='变更前' and parent_context else ''
         if rows:recorded_payloads.append({'title':payload['title'],'rows':rows,'complete':complete})
     counted=[r for r in recorded if not (r['stage']=='变更前' and r['path'] in context_paths)
-             and r not in operation_notes
+             and (r['stage'],r['path']) not in note_paths
              and not (operation and r['stage']==operation['stage'] and r['path'][:1]==('line',))]
     after_count=sum(r['stage']=='变更后' for r in counted)
     before_count=sum(r['stage']=='变更前' for r in counted)

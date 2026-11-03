@@ -87,16 +87,11 @@ def normalize_attachment_transition(event,before,after):
     """Align explicit attachment aliases; missing historical state stays missing."""
     unchanged=(before,after,None)
     if event.action not in ATTACHMENT_ACTIONS or not isinstance(before,dict) or not isinstance(after,dict):return unchanged
-    candidates=[key for key in ('attachment_state','attachment') if isinstance(before.get(key),dict)]
+    candidates=[key for key in ('attachment_state','attachment') if key in before]
     if len(candidates)!=1:return unchanged
     key=candidates[0];state=before[key]
     if not _attachment_fingerprint(event,state) or after.get('attachment')!=state['code']:return unchanged
-    # Explicit parent context may be partial, but it must not contradict the event.
-    for payload in (before,after,before.get('handoff',{}),after.get('handoff',{})):
-        if not isinstance(payload,dict):return unchanged
-        for field,expected in (('id',event.object_id),('organization',event.organization_id)):
-            if field in payload and identity(payload[field],'id')!=identity(expected,'id'):return unchanged
-        if 'code' in payload and payload['code']!=event.code:return unchanged
+    if not _attachment_parent_matches(event,before,after):return unchanged
     if 'attachment_state' in after:
         if not isinstance(after['attachment_state'],dict):return unchanged
         patch=dict(after['attachment_state'])
@@ -123,3 +118,31 @@ def normalize_attachment_transition(event,before,after):
     right={k:v for k,v in after.items() if k not in ('attachment','sha256',time_field,'attachment_state')}
     right['attachment_state']=patch
     return left,right,{'title':title,'code':state['code'],'timestamp':timestamp}
+
+
+def _attachment_parent_matches(event,*stages):
+    for stage in stages:
+        if not isinstance(stage,dict):return False
+        contexts=[stage]+[stage[key] for key in ('handoff','handoffs') if key in stage]
+        for payload in contexts:
+            if not isinstance(payload,dict):return False
+            for field,expected in (('id',event.object_id),('organization',event.organization_id),
+                                   ('object_id',event.object_id)):
+                if field in payload and identity(payload[field],'id')!=identity(expected,'id'):return False
+            if 'code' in payload and payload['code']!=event.code:return False
+            if 'object_type' in payload and payload['object_type']!=event.object_type:return False
+    return True
+
+
+def attachment_comparison_allowed(event,before,after,operation):
+    """A rejected known pair stays separate evidence, not a state transition."""
+    if event.action not in ATTACHMENT_ACTIONS or operation:return True
+    if not _attachment_parent_matches(event,before,after):return False
+    states=[]
+    for stage in (before,after):
+        keys=[key for key in ('attachment_state','attachment') if key in stage]
+        if len(keys)!=1 or not _attachment_fingerprint(event,stage[keys[0]]):return False
+        states.append(stage[keys[0]])
+    left,right=states
+    return all(identity(left[key],'id')==identity(right[key],'id') for key in ('id','organization','object_id')) and all(
+        left[key]==right[key] for key in ('code','object_type','sha256'))
