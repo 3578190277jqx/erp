@@ -1,3 +1,35 @@
+# 验证记录 · v1.1.13 十四次评审优化
+
+2026-11-03，功能b6f1f7b/6131c1a，终审修复ad09d6c。**295项：SQLite286通过/9个PG专用跳过，PostgreSQL294通过/1个SQLite备份专用跳过**。[ad09d6c五组CI](https://github.com/3578190277jqx/erp/actions/runs/41656984618)全部成功，实际日志已下载逐份核对。最终交付SHA另在[原PR Checks](https://github.com/3578190277jqx/erp/pull/1/checks)核验，最终运行链接与实际计数写入PR正文。
+
+- 原277方法保留，新增18方法；按实际展示调整6处旧断言，身份断言移至共同上下文，未删权限/金额/事务用例。
+- 一次完成的独立复核0Critical/3Important/1Minor，独立291全量/9跳过、8探针6预期失败/2通过。四处均纳入一次修复，4新方法RED19失败子场景→GREEN，18相关/295全量通过；作者重跑8探针全通过，无二次独立复审或延后项。
+- 最终代码357历史审计×两种视图：714HTTP200，600非空阶段表，51旧缺行警告，0空差异标签。7已知附件操作对齐；旧缺前值不伪造可比较变化，现代显式null仍正常比较。
+- 350摘要2结果+13操作前字段，另2共同字段、10父上下文字段和处理说明；完整前25/后5字段全部保留。271摘要1结果+11操作前字段、2共同字段。未知/失配附件子树保持分侧事实，其他真实字段差异继续比较。
+- Chrome桌面1440、手机390×844；三个手机审计页面宽均390。七张实拍逐张检查，长图中固定底栏按视口位置呈现；报价明细只查看未提交。
+- 本轮开始、浏览器后、终审修复后36表632业务/账号记录及9文件路径/字节摘要一致，357审计不变，integrity_check=ok。仅认证会话写入，无原库业务/审计/密码/last_login写入，无原库CSV导出。
+- check0issues、无迁移漂移、静态收集、diff通过；无新依赖/迁移。预览v1.1.13登录200；原始授权JSON仍保留路径，历史缺行及未记录业务结果不补造。
+
+[DD1–DD6、四项取舍与完整证据](V1113_FOURTEENTH_REVIEW_RESPONSE.md) · [GitHub开发分支](https://github.com/3578190277jqx/erp/tree/feat/furniture-erp)。
+
+![停止共享动作与处理规则分开](screenshots/v1113-stop-summary.png)
+
+![删除附件同值身份与校验和归入共同上下文](screenshots/v1113-delete-common.png)
+
+![阶段载荷覆盖不宣称对象状态完整](screenshots/v1113-stage-payload.png)
+
+![共用字段定义的报价明细表单](screenshots/v1113-quote-form.png)
+
+![手机停止共享记录与双侧字段](screenshots/v1113-mobile-stop.png)
+
+![手机删除附件部分证据](screenshots/v1113-mobile-delete.png)
+
+![手机完整中文阶段载荷](screenshots/v1113-mobile-stage.png)
+
+---
+
+以下为对应版本历史验证，数字与行为代表当时状态。
+
 # 验证记录 · v1.1.12 十三次评审修正
 
 2026-10-21，功能 `eefe5d2`，独立复核后修复 `d0ba071`。**277项：SQLite268通过/9个PG专用跳过，PostgreSQL276通过/1个SQLite备份专用跳过**。[功能修复五组CI](https://github.com/3578190277jqx/erp/actions/runs/39604912528)已逐份日志核对；最终文档提交另在[原PR Checks](https://github.com/3578190277jqx/erp/pull/1/checks)核验确切SHA。
