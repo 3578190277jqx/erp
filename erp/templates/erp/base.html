@@ -1,0 +1,59 @@
+{% load static ui %}
+<!doctype html>
+<html lang="zh-CN" data-bs-theme="light">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark"><meta name="theme-color" content="#f5f5f7">
+  <title>{% block title %}{{ module.title|default:'工作台' }}{% endblock %} · 栖木 ERP</title>
+  <link rel="icon" type="image/svg+xml" href="{% static 'erp/mark.svg' %}">
+  <script src="{% static 'erp/preferences.js' %}"></script>
+  <link rel="stylesheet" href="{% static 'vendor/tabler.min.css' %}">
+  <link rel="stylesheet" href="{% static 'erp/app.css' %}?v=1.1.13">
+  <script src="{% static 'erp/app.js' %}?v=1.1.13" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main">跳到主要内容</a>
+<div class="nav-backdrop" data-close-nav></div>
+<aside class="sidebar" aria-label="主要导航">
+  <a href="{% url 'dashboard' %}" class="brand"><span class="brand-mark"><i></i><i></i><i></i></span><span class="brand-name">栖木<span>FURNITURE ERP</span></span></a>
+  <div class="workspace-label"><span class="workspace-dot"></span><span>{{ current_organization.name|default:'我的工作空间' }}</span><small>WORKSPACE</small></div>
+  <nav class="side-nav">
+    <a class="nav-item {% if request.path == '/' %}active{% endif %}" href="{% url 'dashboard' %}" title="工作台">{% icon 'grid' %}<span>工作台</span></a>
+    <a class="nav-item {% if request.path == '/reports/' %}active{% endif %}" href="{% url 'reports' %}" title="数据看板">{% icon 'chart' %}<span>数据看板</span></a>
+    {% for group, modules in nav_groups %}
+      <div class="nav-group-label">{{ group }}</div>
+      {% for item in modules %}
+        <a class="nav-item {% if module.key == item.key %}active{% endif %}" href="{% url 'list' item.key %}" title="{{ item.title }}">{% icon item.icon %}<span>{{ item.title }}</span>{% if module.key == item.key %}<b></b>{% endif %}</a>
+        {% if item.key == 'production' and can_schedule %}<a class="nav-item {% if request.path == '/schedule/' %}active{% endif %}" href="{% url 'schedule' %}" title="生产排程">{% icon 'calendar' %}<span>生产排程</span></a>{% endif %}
+      {% endfor %}
+    {% endfor %}
+    <a class="nav-item {% if request.path == '/organizations/' %}active{% endif %}" href="{% url 'organizations' %}" title="组织与权限">{% icon 'settings' %}<span>组织与权限</span></a>
+  </nav>
+  <div class="sidebar-footer"><span class="avatar">{{ user_display|slice:':1' }}</span><div><strong>{{ user_display }}</strong><small>{{ role_label|default:'尚未分配角色' }}</small></div><form action="{% url 'logout' %}" method="post">{% csrf_token %}<button class="icon-button" aria-label="退出登录" title="退出登录">{% icon 'logout' %}</button></form></div>
+</aside>
+<div class="app-shell">
+  <header class="topbar">
+    <div class="toolbar-start"><button class="icon-button" id="nav-toggle" aria-label="切换导航栏" aria-expanded="true">{% icon 'menu' %}</button><div class="breadcrumb"><span>工作空间</span>{% icon 'chevron' %}<strong>{{ module.title|default:'总览' }}</strong></div></div>
+    <div class="toolbar-actions">
+      <form class="organization-switch" method="post" action="{% url 'switch_organization' %}">{% csrf_token %}<label class="sr-only" for="organization-switch">切换组织</label><select name="organization_id" id="organization-switch"><option value="">全部授权组织</option>{% for org in workspace_orgs %}<option value="{{ org.pk }}" {% if active_organization == org.pk %}selected{% endif %}>{{ org.name }}</option>{% endfor %}</select><button type="submit" class="org-submit">切换</button></form>
+      <button class="icon-button" id="density-toggle" aria-label="切换信息密度" title="切换标准 / 紧凑密度">{% icon 'settings' %}</button>
+      <button class="icon-button" id="theme-toggle" aria-label="切换深色或浅色模式" title="切换深色或浅色模式">{% icon 'sun' %}</button>
+      <a class="avatar small" href="{% url 'organizations' %}" aria-label="查看我的角色">{{ user_display|slice:':1' }}</a>
+    </div>
+  </header>
+  <main id="main" class="main" tabindex="-1">
+    {% if messages %}<div class="messages" aria-live="polite">{% for message in messages %}<div class="notice {{ message.tags }}" role="{% if message.tags == 'error' %}alert{% else %}status{% endif %}">{% icon 'check' %}<span>{{ message }}</span><button type="button" class="dismiss" aria-label="关闭提示">×</button></div>{% endfor %}</div>{% endif %}
+    {% block content %}{% endblock %}
+    <footer class="page-footer"><span>栖木 · 让家居经营更从容</span><span>{% if demo_mode %}演示环境 · 虚构业务数据{% else %}业务数据实时计算{% endif %} <i></i> v1.1.13</span></footer>
+  </main>
+</div>
+<nav class="mobile-tabs" aria-label="移动端快捷导航"><a href="{% url 'dashboard' %}">{% icon 'grid' %}<span>工作台</span></a><a href="{% url 'reports' %}">{% icon 'chart' %}<span>看板</span></a><a href="{% url 'organizations' %}">{% icon 'users' %}<span>组织</span></a><button type="button" data-open-nav>{% icon 'menu' %}<span>全部</span></button></nav>
+<dialog class="confirm-dialog" id="workflow-dialog">
+  <form method="post" id="workflow-form">{% csrf_token %}<input type="hidden" name="action" id="workflow-action"><input type="hidden" name="version" id="workflow-version"><input type="hidden" name="parent_version" id="workflow-parent-version">
+    <span class="dialog-symbol">{% icon 'check' %}</span><h2 id="workflow-title">确认操作</h2><p id="workflow-copy">状态变更将同步到关联单据，并留下操作记录。</p>
+    <label for="workflow-note" class="form-label">原因 / 处理结论<span id="workflow-required"></span></label><textarea class="form-control" name="note" id="workflow-note" rows="3" maxlength="5000" placeholder="如：客户已验收、量尺结论或异常原因"></textarea>
+    <div class="dialog-actions"><button type="button" class="btn btn-quiet" data-close-dialog>取消</button><button type="submit" class="btn btn-primary">确认操作</button></div>
+  </form>
+</dialog>
+<dialog class="confirm-dialog" id="confirm-dialog"><span class="dialog-symbol">{% icon 'check' %}</span><h2>确认这次操作？</h2><p id="confirm-copy">请确认所填信息，操作将保留记录。</p><div class="dialog-actions"><button type="button" class="btn btn-quiet" data-close-dialog>返回检查</button><button type="button" class="btn btn-primary" id="confirm-submit">确认提交</button></div></dialog>
+</body></html>
