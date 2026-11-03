@@ -10,7 +10,7 @@ from .permissions import scoped, accessible_organizations
 from .registry import MODULES
 from .time_display import local_timestamp
 from .audit_values import same_value, identity, list_identity, canonical_rows
-from .audit_types import audit_subject, audit_type_title, normalize_stage
+from .audit_types import audit_subject, audit_type_title, normalize_stage, normalize_attachment_transition
 from .line_metadata import LINE_SPECS, ROW_SPECS
 
 LABELS = {
@@ -223,18 +223,25 @@ def line_operation(event,values,model,names):
 
 def audit_context(user,event,organization=None):
     model,_=audit_subject(event)
-    stages=[];values=[];normalization_notes=[]
+    values=[];normalization_notes=[]
     for title,value in [('变更前',event.before),('变更后',event.after)]:
         value,note=normalize_stage(event,value)
         if note:normalization_notes.append(f'{title}：{note}')
         if not isinstance(value,(dict,list)):value={'内容':value}
         values.append(value)
-        stages.append((title,list(flatten(value,model))))
+    before,after,attachment_operation=normalize_attachment_transition(event,*values)
+    values=[before,after]
+    if attachment_operation:
+        attachment_operation=dict(attachment_operation,time=local_timestamp(attachment_operation['timestamp']))
+        normalization_notes.append('附件身份与结果字段按已记录证据对齐；未记录的状态不补全，原始 JSON 保留原结构。')
+    stages=[(title,list(flatten(value,model))) for title,value in zip(('变更前','变更后'),values)]
     names=reference_names(user,event,organization,[row for _,rows in stages for row in rows])
     snapshots=[{'title':title,'rows':[dict(row,value=display(row,names)) for row in rows]} for title,rows in stages]
     all_differences,recorded=compare_payloads(*values,model,names)
     differences=[r for r in all_differences if not r.get('technical')]
     technical=[r for r in all_differences if r.get('technical')]
+    operation_notes=[r for r in recorded if attachment_operation and r['stage']=='变更后'
+                     and r['path']==('policy',) and isinstance(r['raw'],str)]
     operation=line_operation(event,values,model,names)
     is_write=not values[0]
     write_rows=[dict(row,value=display(row,names)) for row in flatten(values[1],model,summary_lists=True)] if is_write else []
@@ -266,7 +273,8 @@ def audit_context(user,event,organization=None):
     context_payloads=[{'title':'变更前','rows':parent_context}] if parent_context else []
     recorded_payloads=[]
     for index,payload in enumerate(snapshots):
-        rows=[r for r in recorded if r['stage']==payload['title'] and not (r['stage']=='变更前' and r['path'] in context_paths)]
+        rows=[r for r in recorded if r['stage']==payload['title'] and r not in operation_notes
+              and not (r['stage']=='变更前' and r['path'] in context_paths)]
         complete=covers(rows,payload['rows'])
         payload['render_rows']=[row for path,row in logical[index].items() if path not in common]
         payload['partial']=len(payload['render_rows'])!=len(payload['rows'])
@@ -275,13 +283,14 @@ def audit_context(user,event,organization=None):
             if payload['title']=='变更前' and parent_context else ''
         if rows:recorded_payloads.append({'title':payload['title'],'rows':rows,'complete':complete})
     counted=[r for r in recorded if not (r['stage']=='变更前' and r['path'] in context_paths)
+             and r not in operation_notes
              and not (operation and r['stage']==operation['stage'] and r['path'][:1]==('line',))]
     after_count=sum(r['stage']=='变更后' for r in counted)
     before_count=sum(r['stage']=='变更前' for r in counted)
     heading='本次变更' if operation else '本次写入' if is_write else '本次变更' if differences else '本次操作记录'
     if is_write and not operation:summary=f'{len(write_rows)} 个记录字段'
     else:
-        parts=[operation['title']] if operation else []
+        parts=[operation['title']] if operation else [attachment_operation['title']] if attachment_operation else []
         if differences:parts.append(f'{len(differences)} 项业务变化')
         if technical:parts.append(f'{len(technical)} 项校验信息更新')
         if after_count:parts.append(f'{after_count} 个结果字段')
@@ -293,6 +302,7 @@ def audit_context(user,event,organization=None):
             'audit_technical_differences':technical,'audit_shared_rows':shared,
             'audit_context_payloads':context_payloads,
             'audit_line_operation':operation,'audit_normalization_notes':normalization_notes,
+            'audit_attachment_operation':attachment_operation,'audit_operation_notes':operation_notes,
             'audit_evidence_warning':'本条增行事件未记录被添加的明细，无法从本条审计还原当时的物料、数量或单价。' if missing_line else '',
             'audit_is_write':is_write,'audit_write_rows':write_rows,'audit_heading':heading,'audit_summary':summary,
             'audit_recorded_fields':recorded,

@@ -115,7 +115,8 @@ class AuditMeaningAndBoundaryTests(EleventhFixture):
         context=self.context(event)
         self.assertEqual(len(context['audit_differences']),2)
         self.assertEqual(len(context['audit_technical_differences']),1)
-        self.assertEqual(sum(r['stage']=='变更后' for r in context['audit_recorded_fields']),3)
+        self.assertEqual(sum(r['stage']=='变更后' for r in context['audit_recorded_fields']),2)
+        self.assertTrue(any(r['value']==item.code for r in context['audit_shared_rows']))
         self.assertEqual(next(r for r in context['audit_differences'] if r['key'].endswith('归档时间'))['before'],'尚未归档')
         self.client.force_login(self.manager)
         shown=self.client.get(f'/modules/handoffs/{self.handoff.pk}/').context['attachments'][0]

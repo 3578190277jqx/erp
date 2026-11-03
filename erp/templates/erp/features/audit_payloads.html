@@ -6,7 +6,9 @@
   {% if audit_evidence_warning %}<p class="audit-reference-note">{{ audit_evidence_warning }}</p>{% endif %}
   {% for note in audit_normalization_notes %}<p class="audit-reference-note subtle">{{ note }}</p>{% endfor %}
   {% if audit_line_operation %}<p class="audit-reference-note">本条已记录{{ audit_line_operation.verb }}的{{ audit_line_operation.noun }}：{{ audit_line_operation.description }}。</p>{% endif %}
+  {% if audit_attachment_operation %}<p class="audit-reference-note">{{ audit_attachment_operation.title }}：{{ audit_attachment_operation.code }} · 记录时间 {{ audit_attachment_operation.time }}。该操作记录不代表缺失的前后状态已补齐。</p>{% endif %}
   {% if not audit_full_view %}
+  {% for row in audit_operation_notes %}<p class="audit-reference-note subtle">操作说明 · {{ row.key }}：{{ row.value }}</p>{% endfor %}
   {% if audit_is_write %}
   <div class="table-scroll"><table class="data-table"><thead><tr><th>字段</th><th>写入内容</th></tr></thead><tbody>
     {% for row in audit_write_rows %}<tr><th scope="row">{{ row.key }}</th><td><pre class="audit-value">{{ row.value }}</pre></td></tr>
@@ -25,7 +27,7 @@
 {% if audit_full_view %}
 {% for payload in audit_payloads %}{% if payload.rows %}
 <details class="panel audit-panel audit-snapshot">
-  <summary>完整{{ payload.title }}快照 · {{ payload.rows|length }} 个字段{% if payload.context_note %} · 含父单据上下文{% endif %}</summary>
+  <summary>{{ payload.title }}阶段载荷 · {{ payload.rows|length }} 个字段{% if payload.context_note %} · 含父单据上下文{% endif %}</summary>
   {% if payload.context_note %}<p class="audit-reference-note subtle">{{ payload.context_note }}</p>{% endif %}
   <div class="table-scroll"><table class="data-table"><thead><tr><th>字段</th><th>记录内容</th></tr></thead><tbody>
   {% for row in payload.rows %}<tr><th scope="row">{{ row.key }}</th><td><pre class="audit-value">{{ row.value }}</pre></td></tr>{% endfor %}
@@ -50,7 +52,7 @@
 {% endfor %}
 {% if not audit_is_write %}{% for payload in audit_recorded_payloads %}{% if payload.rows %}
 <details class="panel audit-panel audit-snapshot" {% if payload.title == '变更后' %}open{% endif %}>
-  <summary>仅{{ payload.title }}记录的内容 · {{ payload.rows|length }} 个字段{% if payload.complete %} · 已含完整{{ payload.title }}快照{% endif %}</summary>
+  <summary>仅{{ payload.title }}记录的内容 · {{ payload.rows|length }} 个字段{% if payload.complete %} · 本阶段载荷全部字段{% endif %}</summary>
   <div class="table-scroll"><table class="data-table"><thead><tr><th>字段</th><th>记录内容（不推断增删）</th></tr></thead>
     <tbody>{% for row in payload.rows %}<tr><th scope="row">{{ row.key }}</th><td><pre class="audit-value">{{ row.value }}</pre></td></tr>{% endfor %}</tbody>
   </table></div>
@@ -65,7 +67,7 @@
 {% endif %}
 {% for payload in audit_payloads %}{% if payload.show %}
 <details class="panel audit-panel audit-snapshot">
-  <summary>{% if payload.partial %}其余{{ payload.title }}快照字段{% else %}完整{{ payload.title }}快照{% endif %}</summary>
+  <summary>{% if payload.partial %}其余{{ payload.title }}载荷字段{% else %}{{ payload.title }}阶段载荷（全部已记录字段）{% endif %}</summary>
   <div class="table-scroll"><table class="data-table"><thead><tr><th>字段</th><th>记录内容</th></tr></thead>
   <tbody>{% for row in payload.render_rows %}<tr><th scope="row">{{ row.key }}</th><td><pre class="audit-value">{{ row.value }}</pre></td></tr>
   {% empty %}<tr><td colspan="2" class="table-empty">未记录此阶段快照</td></tr>{% endfor %}</tbody></table></div>

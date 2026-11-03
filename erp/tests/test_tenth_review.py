@@ -46,7 +46,7 @@ class GovernanceOutcomeTests(TenthReviewFixture):
         self.assertEqual(shown.stop_actor,self.manager.username)
         audit_page=self.page(event)
         self.assertEqual(audit_page.status_code,200)
-        self.assertContains(audit_page,'2 项业务变化 · 1 项校验信息更新 · 3 个结果字段')
+        self.assertContains(audit_page,'2 项业务变化 · 1 项校验信息更新 · 1 个结果字段')
         self.assertContains(audit_page,'人工停止共享')
 
     def test_delete_compares_version_and_explicit_delete_time_and_keeps_flat_keys(self):
@@ -63,7 +63,8 @@ class GovernanceOutcomeTests(TenthReviewFixture):
         technical=self.context(event)['audit_technical_differences']
         self.assertEqual(len(technical),1)
         self.assertEqual(technical[0]['before'],'1');self.assertEqual(technical[0]['after'],'2')
-        self.assertContains(self.page(event),'1 项业务变化 · 1 项校验信息更新 · 1 个结果字段')
+        self.assertContains(self.page(event),'1 项业务变化 · 1 项校验信息更新')
+        self.assertTrue(any(r['value']==item.code for r in self.context(event)['audit_shared_rows']))
 
     def test_audit_write_failure_rolls_back_attachment_and_epoch(self):
         item=self.upload(self.receiver)
@@ -139,8 +140,7 @@ class AuditOutcomePresentationTests(TenthReviewFixture):
         response=self.page(event)
         self.assertContains(response,'>前侧唯一文本</pre>',count=1)
         self.assertContains(response,'>后侧唯一文本</pre>',count=1)
-        self.assertContains(response,'已含完整变更前快照')
-        self.assertContains(response,'已含完整变更后快照')
+        self.assertContains(response,'本阶段载荷全部字段',count=2)
         self.assertNotContains(response,'<summary>完整变更前快照</summary>',html=True)
         self.assertContains(response,'原始记录 · JSON')
 

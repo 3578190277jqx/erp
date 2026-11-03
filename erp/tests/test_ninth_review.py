@@ -28,8 +28,8 @@ class AuditPayloadSemanticsTests(EighthReviewFixture):
                          {'附件状态快照 / 归档时间','附件状态快照 / 归档原因类别'})
         self.assertEqual(len(context['audit_technical_differences']),1)
         recorded={r['key']:r['value'] for r in context['audit_recorded_fields'] if r['stage']=='变更后'}
-        self.assertEqual(set(recorded),{'附件编号','停止原因','处理规则'})
-        self.assertEqual(recorded['附件编号'],item.code)
+        self.assertEqual(set(recorded),{'停止原因','处理规则'})
+        self.assertTrue(any(r['value']==item.code for r in context['audit_shared_rows']))
         self.assertEqual(recorded['停止原因'],'误传')
         self.assertEqual(self.handoff.code,event.before['handoff']['code'])
         response=self.page(event)
