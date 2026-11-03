@@ -15,9 +15,7 @@ def add_line(user, document, values, version, delete_id=None):
         raise ValidationError('单据已冻结，不能再修改明细。')
     before = snapshot(document)
     model, key = spec.model,spec.parent_field
-    allowed = {'name', 'room', 'specification', 'quantity', 'unit', 'unit_price','pricing_mode','category',
-               'width_mm','height_mm','unit_cost','discountable'} if isinstance(document, Quote) else (
-        {'material', 'quantity', 'waste','order_line'} if isinstance(document, Breakdown) else {'material', 'quantity', 'unit_price'})
+    allowed = frozenset(spec.fields)
     if set(values) - allowed:
         raise ValidationError('明细字段无效。')
     if delete_id:

@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from . import models as m
 from .permissions import accessible_organizations, scoped, member_orgs, role_allows
+from .line_metadata import LINE_SPECS
 
 
 def style_fields(form):
@@ -101,14 +102,10 @@ def document_form(module, user, data=None, instance=None, active_org=None, bound
 
 
 def line_form(user, document, data=None):
-    if isinstance(document, m.Quote):
-        model, fields = m.QuoteLine, ['name','room','specification','category','pricing_mode','width_mm','height_mm',
-                                    'quantity','unit','unit_price','unit_cost','discountable']
-    elif isinstance(document, m.Breakdown):
-        model, fields = m.BOMLine, ['order_line','material', 'quantity', 'waste']
-    else:
-        model, fields = m.PurchaseLine, ['material', 'quantity', 'unit_price']
-    Form = forms.modelform_factory(model, fields=fields)
+    spec=LINE_SPECS.get(type(document))
+    if spec is None or not spec.generic_editor:
+        raise ValidationError('当前单据不支持通用明细表单，请使用对应业务入口。')
+    Form = forms.modelform_factory(spec.model, fields=spec.fields)
     form = Form(data=data)
     if isinstance(document,m.Quote):
         form.fields['quantity'].help_text='按尺寸计价填件数；展开面积填实测㎡；数量和套餐填套数。'

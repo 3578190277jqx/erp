@@ -1,7 +1,11 @@
 """Fourteenth-review evidence normalization must never complete missing history."""
 from copy import deepcopy
 from unittest.mock import patch
-from erp import models as m
+from types import SimpleNamespace
+from django.core.exceptions import ValidationError
+from erp import models as m, services
+from erp.forms import line_form
+from erp.line_metadata import LINE_SPECS
 from erp.audit_types import normalize_stage
 from erp.services import evidence
 from erp.services.common import snapshot
@@ -137,3 +141,45 @@ class AttachmentPairTests(ThirteenthFixture):
             with self.subTest(kind=kind):
                 normalized,note=normalize_stage(event,dict(payload,kind=kind))
                 self.assertNotIn('attachment_state',normalized);self.assertEqual(note,'')
+
+
+class LineEditorSchemaTests(ThirteenthFixture):
+    def test_real_forms_keep_fields_cost_hiding_and_material_scope(self):
+        quote=self.make(m.Quote,customer=self.customer,title='统一表单')
+        purchase=self.make(m.Purchase,warehouse=self.warehouse,supplier='材料商')
+        breakdown=self.make(m.Breakdown,order=self.source,quantity=1)
+        for document in (quote,purchase,breakdown):
+            form=line_form(self.admin,document)
+            self.assertEqual(set(form.fields),set(LINE_SPECS[type(document)].fields)|{'version'})
+            self.assertIsInstance(LINE_SPECS[type(document)].fields,tuple)
+        self.assertNotIn('unit_cost',line_form(self.sales,quote).fields)
+        secret=m.Material.objects.create(organization=self.factory,owner=self.admin,name='外部物料',unit_cost=1)
+        for document in (purchase,breakdown):
+            form=line_form(self.admin,document)
+            self.assertFalse(form.fields['material'].queryset.filter(pk=secret.pk).exists())
+            self.assertTrue(form.fields['material'].queryset.filter(pk=self.board.pk).exists())
+
+    def test_unsupported_and_dedicated_documents_do_not_get_purchase_forms(self):
+        change=self.make(m.ChangeRequest,order=self.source,order_version=self.source.version,
+            proposed_total=self.source.total,proposed_due_date=self.source.due_date)
+        for document in (change,self.source):
+            with self.subTest(model=type(document)):
+                with self.assertRaises(ValidationError):line_form(self.admin,document)
+
+    def narrowed_spec(self):
+        return SimpleNamespace(model=m.QuoteLine,parent_field='quote',generic_editor=True,
+            fields=('name','quantity','unit_price','unit','width_mm','height_mm'))
+
+    def test_form_uses_registered_fields_instead_of_its_own_if_else_schema(self):
+        quote=self.make(m.Quote,customer=self.customer,title='字段收窄')
+        spec=self.narrowed_spec()
+        with patch('erp.forms.LINE_SPECS',{m.Quote:spec},create=True):
+            form=line_form(self.admin,quote)
+        self.assertEqual(set(form.fields),set(spec.fields)|{'version'})
+
+    def test_writer_enforces_same_registered_fields(self):
+        quote=self.make(m.Quote,customer=self.customer,title='写入边界')
+        with patch('erp.services.lines.LINE_SPECS',{m.Quote:self.narrowed_spec()}):
+            with self.assertRaises(ValidationError):
+                services.add_line(self.admin,quote,dict(name='背板',quantity=1,unit_price=0,room='未注册'),quote.version)
+        self.assertFalse(quote.lines.exists())
